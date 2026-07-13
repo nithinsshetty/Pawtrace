@@ -1,0 +1,1 @@
+# Firestore security rules are deprecated. All authorization is handled on the Node.js backend.

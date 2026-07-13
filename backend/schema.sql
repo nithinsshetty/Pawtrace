@@ -1,0 +1,208 @@
+-- PawTrace Finalized Relational Database Schema
+-- For Node.js/Express + MySQL Session store
+
+CREATE DATABASE IF NOT EXISTS pawtrace;
+USE pawtrace;
+
+-- 1. Sessions Table (Required by express-mysql-session)
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,
+  expires INT(11) UNSIGNED NOT NULL,
+  data TEXT COLLATE utf8mb4_bin,
+  PRIMARY KEY (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 2. Users Table
+CREATE TABLE IF NOT EXISTS users (
+  id VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role ENUM('customer', 'vet', 'ngo', 'admin') NOT NULL DEFAULT 'customer',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 3. Pets Table
+CREATE TABLE IF NOT EXISTS pets (
+  id INT AUTO_INCREMENT NOT NULL,
+  owner_id VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  breed VARCHAR(255) NOT NULL,
+  dob DATE DEFAULT NULL,
+  gender VARCHAR(50) DEFAULT NULL,
+  weight DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  privacy_settings ENUM('public', 'private') NOT NULL DEFAULT 'public',
+  emergency_contact VARCHAR(50) DEFAULT NULL,
+  vaccination_status VARCHAR(50) DEFAULT NULL,
+  medical_notes TEXT DEFAULT NULL,
+  profile_image VARCHAR(2048) DEFAULT NULL,
+  paw_trace_id VARCHAR(10) NOT NULL UNIQUE,
+  lost_status ENUM('SAFE', 'LOST') NOT NULL DEFAULT 'SAFE',
+  has_tag BOOLEAN NOT NULL DEFAULT FALSE,
+  tag_order_id INT DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4. Pet Scans Table
+CREATE TABLE IF NOT EXISTS pet_scans (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_id INT NOT NULL,
+  latitude DECIMAL(10,8) DEFAULT NULL,
+  longitude DECIMAL(11,8) DEFAULT NULL,
+  accuracy DECIMAL(6,2) DEFAULT NULL,
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  maps_link VARCHAR(2048) DEFAULT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 5. Pet Journal Entries Table
+CREATE TABLE IF NOT EXISTS pet_journal_entries (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_id INT NOT NULL,
+  weight DECIMAL(5,2) NOT NULL,
+  date DATE NOT NULL,
+  notes TEXT DEFAULT NULL,
+  image_url VARCHAR(2048) DEFAULT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 6. Pet Medical Records Table
+CREATE TABLE IF NOT EXISTS pet_medical_records (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_id INT NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  type VARCHAR(100) NOT NULL,
+  date DATE NOT NULL,
+  next_due DATE DEFAULT NULL,
+  status ENUM('Completed', 'Overdue') NOT NULL DEFAULT 'Completed',
+  notes TEXT DEFAULT NULL,
+  document_url VARCHAR(2048) DEFAULT NULL,
+  authorized_vet_id VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE,
+  FOREIGN KEY (authorized_vet_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 7. Pet Reminders Table
+CREATE TABLE IF NOT EXISTS pet_reminders (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_id INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  due_date DATE NOT NULL,
+  category VARCHAR(100) NOT NULL,
+  completed BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 8. Vet Profiles Table
+CREATE TABLE IF NOT EXISTS vet_profiles (
+  user_id VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  clinic VARCHAR(255) DEFAULT NULL,
+  address TEXT DEFAULT NULL,
+  verified BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 9. NGO Profiles Table
+CREATE TABLE IF NOT EXISTS ngo_profiles (
+  user_id VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  organization VARCHAR(255) DEFAULT NULL,
+  address TEXT DEFAULT NULL,
+  verified BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 10. Vet Access Table
+CREATE TABLE IF NOT EXISTS vet_access (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_id INT NOT NULL,
+  vet_id VARCHAR(255) NOT NULL,
+  status ENUM('active', 'revoked') NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE,
+  FOREIGN KEY (vet_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 11. Caregiver Tokens Table
+CREATE TABLE IF NOT EXISTS caregiver_tokens (
+  id INT AUTO_INCREMENT NOT NULL,
+  token VARCHAR(255) NOT NULL UNIQUE,
+  pet_id INT NOT NULL,
+  owner_id VARCHAR(255) NOT NULL,
+  sitter_name VARCHAR(255) DEFAULT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  expires_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 12. Stray Reports Table
+CREATE TABLE IF NOT EXISTS stray_reports (
+  id INT AUTO_INCREMENT NOT NULL,
+  animal_type VARCHAR(100) NOT NULL,
+  status ENUM('Reported', 'Assigned', 'Resolved') NOT NULL DEFAULT 'Reported',
+  health_condition VARCHAR(255) DEFAULT NULL,
+  latitude DECIMAL(10,8) DEFAULT NULL,
+  longitude DECIMAL(11,8) DEFAULT NULL,
+  reported_by VARCHAR(255) DEFAULT NULL,
+  reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  FOREIGN KEY (reported_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 13. Adoptions Table
+CREATE TABLE IF NOT EXISTS adoptions (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_name VARCHAR(255) NOT NULL,
+  breed VARCHAR(255) NOT NULL,
+  age VARCHAR(50) DEFAULT NULL,
+  size VARCHAR(50) DEFAULT NULL,
+  good_with_children BOOLEAN NOT NULL DEFAULT TRUE,
+  good_with_pets BOOLEAN NOT NULL DEFAULT TRUE,
+  special_needs BOOLEAN NOT NULL DEFAULT FALSE,
+  status ENUM('available', 'adopted') NOT NULL DEFAULT 'available',
+  org_id VARCHAR(255) NOT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (org_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 14. Tag Orders Table
+CREATE TABLE IF NOT EXISTS tag_orders (
+  id INT AUTO_INCREMENT NOT NULL,
+  pet_id INT NOT NULL,
+  user_id VARCHAR(255) NOT NULL,
+  shipping_address TEXT NOT NULL,
+  status ENUM('Pending', 'Shipped', 'Delivered') NOT NULL DEFAULT 'Pending',
+  tracking_number VARCHAR(100) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 15. Notifications Table
+CREATE TABLE IF NOT EXISTS notifications (
+  id INT AUTO_INCREMENT NOT NULL,
+  user_id VARCHAR(255) NOT NULL,
+  type VARCHAR(50) NOT NULL,
+  message TEXT NOT NULL,
+  maps_link VARCHAR(2048) DEFAULT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

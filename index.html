@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Primary SEO Meta Tags -->
+  <title>PawTrace — Smart Digital Pet Identity & Recovery Ecosystem</title>
+  <meta name="description" content="PawTrace provides digital identities, QR-linked profiles, and smart recovery tracking to keep your pets safe and healthy. Track medical history, set reminders, and manage caregiver access.">
+  <meta name="keywords" content="pet recovery, digital pet ID, QR pet tag, pet medical records, pet journal, dog tracking, cat identity, caregiver access">
+  <meta name="author" content="PawTrace Team">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://pawtrace.web.app/">
+  <meta property="og:title" content="PawTrace — Smart Digital Pet Identity & Recovery Ecosystem">
+  <meta property="og:description" content="Keep your pets safe with QR-linked profiles, real-time location recovery, medical tracking, and temporary caregiver access.">
+  <meta property="og:image" content="https://pawtrace.web.app/assets/og-image.jpg">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://pawtrace.web.app/">
+  <meta property="twitter:title" content="PawTrace — Smart Digital Pet Identity & Recovery Ecosystem">
+  <meta property="twitter:description" content="Keep your pets safe with QR-linked profiles, real-time location recovery, medical tracking, and temporary caregiver access.">
+  <meta property="twitter:image" content="https://pawtrace.web.app/assets/og-image.jpg">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐾</text></svg>">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Leaflet Map CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- PWA Support -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1f7a8c">
+
+  <!-- Global Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- External Visual Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+  <!-- Background decorative glass blobs for modern SaaS feel -->
+  <div class="ambient-background">
+    <div class="ambient-blob blob-1"></div>
+    <div class="ambient-blob blob-2"></div>
+    <div class="ambient-blob blob-3"></div>
+  </div>
+
+  <!-- App Main Container -->
+  <div id="app-container" class="app-layout">
+    
+    <!-- Sidebar Navigation -->
+    <aside id="app-sidebar" class="sidebar-nav hidden">
+      <div class="sidebar-brand">
+        <span class="brand-logo">🐾</span>
+        <span class="brand-text">PawTrace</span>
+      </div>
+      
+      <!-- User Quick Profile Info -->
+      <div class="sidebar-user-card">
+        <div class="user-avatar-container">
+          <img id="sidebar-user-avatar" src="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%231F7A8C%22/><text x=%2250%25%22 y=%2260%25%22 font-size=%2240%22 text-anchor=%22middle%22 fill=%22white%22>U</text></svg>" alt="User profile icon">
+        </div>
+        <div class="user-info">
+          <span id="sidebar-user-name" class="user-name">Loading...</span>
+          <span id="sidebar-user-role" class="user-role">Pet Owner</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-menu">
+        <a href="#/dashboard" class="menu-item active" id="nav-dashboard">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>Dashboard</span>
+        </a>
+        <a href="#/pets" class="menu-item" id="nav-pets">
+          <i class="fa-solid fa-paw"></i>
+          <span>My Pets</span>
+        </a>
+        <a href="#/lost-pets" class="menu-item" id="nav-lost-pets">
+          <i class="fa-solid fa-location-dot"></i>
+          <span>Lost & Found</span>
+        </a>
+        <a href="#/vets" class="menu-item" id="nav-vets">
+          <i class="fa-solid fa-user-doctor"></i>
+          <span>Vets Finder</span>
+        </a>
+        <a href="#/vet-portal" class="menu-item" id="nav-vet-portal">
+          <i class="fa-solid fa-briefcase-medical"></i>
+          <span>Vet Portal</span>
+        </a>
+        <a href="#/ngo" class="menu-item" id="nav-ngo">
+          <i class="fa-solid fa-handshake-angle"></i>
+          <span>NGO Rescue</span>
+        </a>
+        <a href="#/community" class="menu-item" id="nav-community">
+          <i class="fa-solid fa-users"></i>
+          <span>Community</span>
+        </a>
+        <a href="#/ai" class="menu-item" id="nav-ai">
+          <i class="fa-solid fa-robot"></i>
+          <span>Pet AI Guide</span>
+        </a>
+        <a href="#/profile" class="menu-item" id="nav-profile">
+          <i class="fa-solid fa-user-gear"></i>
+          <span>Profile</span>
+        </a>
+        <a href="#/settings" class="menu-item" id="nav-settings">
+          <i class="fa-solid fa-sliders"></i>
+          <span>Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="btn-logout" class="btn btn-secondary btn-full">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i>
+          <span>Sign Out</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Viewport Section -->
+    <div class="viewport-wrapper">
+      
+      <!-- Top Navigation Bar -->
+      <header id="app-navbar" class="top-navbar hidden">
+        <div class="navbar-left">
+          <button id="sidebar-toggle" class="nav-toggle-btn" aria-label="Toggle navigation menu">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <h1 id="page-title" class="page-title">Dashboard</h1>
+        </div>
+        <div class="navbar-right">
+          <!-- Notification Toggle -->
+          <div class="notification-bell-container">
+            <button id="notification-toggle" class="icon-btn" aria-label="Notifications panel">
+              <i class="fa-solid fa-bell"></i>
+              <span id="notification-badge" class="badge hidden">0</span>
+            </button>
+            
+            <!-- Real-time Notification Panel -->
+            <div id="notification-panel" class="notification-dropdown glass-card hidden">
+              <div class="dropdown-header">
+                <h3>Notifications</h3>
+                <button id="clear-notifications" class="text-link">Clear all</button>
+              </div>
+              <hr class="divider">
+              <div id="notification-list" class="dropdown-list">
+                <!-- Notifications will populate dynamically here -->
+                <div class="empty-state-mini">
+                  <i class="fa-solid fa-bell-slash"></i>
+                  <p>All caught up!</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Dark Mode Toggle -->
+          <button id="theme-toggle" class="icon-btn" aria-label="Toggle theme color mode">
+            <i class="fa-solid fa-moon"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Dynamic Page Container -->
+      <main id="app-viewport" class="page-content">
+        <!-- Rendered view goes here -->
+        <div class="skeleton-container">
+          <div class="skeleton skeleton-title"></div>
+          <div class="skeleton skeleton-text"></div>
+          <div class="skeleton skeleton-card"></div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Mobile Bottom Navigation (Visible on screen < 768px for SPA comfort) -->
+    <nav id="mobile-nav" class="mobile-nav-bar hidden">
+      <a href="#/dashboard" class="mobile-nav-item active" id="m-nav-dashboard">
+        <i class="fa-solid fa-chart-line"></i>
+        <span>Dashboard</span>
+      </a>
+      <a href="#/pets" class="mobile-nav-item" id="m-nav-pets">
+        <i class="fa-solid fa-paw"></i>
+        <span>Pets</span>
+      </a>
+      <a href="#/lost-pets" class="mobile-nav-item" id="m-nav-lost-pets">
+        <i class="fa-solid fa-location-dot"></i>
+        <span>Lost</span>
+      </a>
+      <a href="#/community" class="mobile-nav-item" id="m-nav-community">
+        <i class="fa-solid fa-users"></i>
+        <span>Social</span>
+      </a>
+    </nav>
+
+  </div>
+
+  <!-- Global Modal Overlay -->
+  <div id="global-modal" class="modal-overlay hidden">
+    <div class="modal-card glass-card modal-animated">
+      <div class="modal-header">
+        <h2 id="modal-title">Modal Title</h2>
+        <button id="modal-close" class="modal-close-btn" aria-label="Close modal window">&times;</button>
+      </div>
+      <div id="modal-body" class="modal-body">
+        <!-- Injected modal content -->
+      </div>
+      <div id="modal-footer" class="modal-footer hidden">
+        <!-- Optional footer actions -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Loading Overlay -->
+  <div id="global-loading" class="loading-overlay">
+    <div class="loader-container">
+      <div class="paw-spinner">
+        <i class="fa-solid fa-paw fa-spin-pulse"></i>
+      </div>
+      <span class="loading-text">Fetching PawTrace...</span>
+    </div>
+  </div>
+
+  <!-- Toast Notification System Container -->
+  <div id="toast-container" class="toast-wrapper"></div>
+
+  <!-- Entry Script Loader (ES Module) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

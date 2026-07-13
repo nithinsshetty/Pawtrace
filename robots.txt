@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /caregiver/
+Disallow: /vet-portal/
+Disallow: /ngo/
+
+Sitemap: https://pawtrace-2aa9a.firebaseapp.com/sitemap.xml
