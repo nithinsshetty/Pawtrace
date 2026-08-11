@@ -1,14 +1,13 @@
 // ==========================================================================
-// PAWTRACE SETTINGS & PROFILE MANAGEMENT MODULE
+// SETTINGS & PROFILE MANAGEMENT MODULE (Supabase)
 // ==========================================================================
 
-import { db, isFirebaseConfigured } from './firebase-config.js';
-import { getCurrentUser, updateUserProfile } from './auth.js';
-import { showToast, showLoading } from './utils.js';
+import { supabase } from './supabase-config.js';
+import { getCurrentUser, updateUserProfile, signOut } from './auth.js';
+import { showToast, showLoading, showModal, closeModal } from './utils.js';
+import { Router } from './router.js';
+import { initPasswordToggles } from './pages.js';
 
-/**
- * Render Profile Management Page
- */
 export function renderProfile() {
   const viewport = document.getElementById('app-viewport');
   const titleEl = document.getElementById('page-title');
@@ -18,53 +17,140 @@ export function renderProfile() {
   if (!user) return;
 
   viewport.innerHTML = `
-    <div class="glass-card magnetic-card" style="max-width: 600px; margin: 0 auto; padding: 2.5rem;">
-      <div style="text-align: center; margin-bottom: 2rem;">
-        <div style="width: 100px; height: 100px; border-radius: var(--radius-full); overflow: hidden; margin: 0 auto 1rem; border: 3px solid var(--teal); box-shadow:var(--shadow-md);">
-          <img src="${user.photoURL || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.uid}" style="width:100%; height:100%; object-fit: cover;" alt="Avatar">
+    <div style="max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem;">
+      <div class="glass-card magnetic-card" style="padding: 2.5rem;">
+        <div style="text-align: center; margin-bottom: 2rem;">
+          <div style="width: 100px; height: 100px; border-radius: var(--radius-full); overflow: hidden; margin: 0 auto 1rem; border: 3px solid var(--teal); box-shadow:var(--shadow-md);">
+            <img src="${user.photoURL || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.uid}" style="width:100%; height:100%; object-fit: cover;" alt="Avatar">
+          </div>
+          <h2 style="font-weight: 800; font-family:'Outfit';">${user.displayName || 'PawTrace User'}</h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted);">${user.email}</p>
         </div>
-        <h2 style="font-weight: 800; font-family:'Outfit';">${user.displayName || 'PawTrace User'}</h2>
-        <p style="font-size: 0.85rem; color: var(--text-muted);">${user.email}</p>
+
+        <form id="profile-edit-form" style="display:flex; flex-direction:column; gap:1.25rem;">
+          <div class="form-group">
+            <label for="profile-name">Display Name</label>
+            <input type="text" id="profile-name" class="form-control" value="${user.displayName || ''}" placeholder="Full Name" required autocomplete="name">
+          </div>
+
+          <div class="form-group">
+            <label for="profile-email">Email Address (Read-only)</label>
+            <input type="email" id="profile-email" class="form-control" value="${user.email}" readonly disabled autocomplete="username">
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full mt-1">
+            <i class="fa-solid fa-floppy-disk"></i> Save Profile Changes
+          </button>
+        </form>
       </div>
 
-      <form id="profile-edit-form" style="display:flex; flex-direction:column; gap:1.25rem;">
-        <div class="form-group">
-          <label for="profile-name">Display Name</label>
-          <input type="text" id="profile-name" class="form-control" value="${user.displayName || ''}" placeholder="Full Name" required autocomplete="name">
-        </div>
-        
-        <div class="form-group">
-          <label for="profile-email">Email Address (Read-only)</label>
-          <input type="email" id="profile-email" class="form-control" value="${user.email}" readonly disabled autocomplete="username">
-        </div>
-
-        <button type="submit" class="btn btn-primary btn-full mt-1">
-          <i class="fa-solid fa-floppy-disk"></i> Save Profile Changes
+      <div class="glass-card magnetic-card" style="padding: 2rem; border: 1px solid rgba(224, 86, 86, 0.3); background: rgba(224, 86, 86, 0.04);">
+        <h3 style="font-weight: 800; font-family:'Outfit'; color: var(--accent-red); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Danger Zone
+        </h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.4;">
+          Permanently deactivate your PawTrace profile and remove account authentication credentials.
+        </p>
+        <button id="btn-delete-account" class="btn btn-danger btn-full" style="background: var(--accent-red); border: none; color: white;">
+          <i class="fa-solid fa-user-xmark"></i> Delete Account
         </button>
-      </form>
+      </div>
     </div>
   `;
 
-  // Bind submit event
   const form = document.getElementById('profile-edit-form');
   form.onsubmit = async (e) => {
     e.preventDefault();
     const name = document.getElementById('profile-name').value.trim();
     try {
       await updateUserProfile(name);
-      
-      // Sync Sidebar Display
       const sidebarName = document.getElementById('sidebar-user-name');
       if (sidebarName) sidebarName.textContent = name;
-    } catch (err) {
-      // Handled inside updateUserProfile()
-    }
+    } catch (err) {}
   };
+
+  const deleteBtn = document.getElementById('btn-delete-account');
+  if (deleteBtn) {
+    deleteBtn.onclick = () => {
+      showModal({
+        title: 'Delete Account Confirmation',
+        bodyHtml: `
+          <div style="text-align: center; margin-bottom: 1rem;">
+            <i class="fa-solid fa-circle-exclamation" style="font-size: 2.5rem; color: var(--accent-red); margin-bottom: 0.75rem;"></i>
+            <h4 style="font-family: 'Outfit'; font-weight: 700;">Are you absolutely sure?</h4>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.4;">
+              This action will permanently deactivate your account and revoke access to PawTrace services. Please enter your current password to confirm:
+            </p>
+          </div>
+          <div class="form-group" style="margin-top: 1rem;">
+            <label for="delete-password-confirm" style="font-size: 0.8rem; font-weight: 600;">Confirm Password *</label>
+            <div style="position: relative;">
+              <input type="password" id="delete-password-confirm" class="form-control" placeholder="••••••••" required autocomplete="current-password" style="padding-right: 2.5rem;">
+              <button type="button" class="password-toggle-btn" aria-label="Toggle password visibility" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 0.25rem;">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+            </div>
+          </div>
+        `,
+        confirmText: 'Permanently Delete Account',
+        cancelText: 'Cancel',
+        onConfirm: async () => {
+          const passwordInput = document.getElementById('delete-password-confirm');
+          const password = passwordInput ? passwordInput.value : '';
+
+          if (!password) {
+            showToast("Please enter your current password to confirm deletion.", "warning");
+            return true;
+          }
+
+          showLoading(true, "Deactivating account...");
+          try {
+            // Re-authenticate by attempting a fresh sign-in with the current password
+            const { error: reauthErr } = await supabase.auth.signInWithPassword({ email: user.email, password });
+            if (reauthErr) {
+              showToast("Incorrect password. Account deletion canceled.", "error");
+              return true;
+            }
+
+            // Deactivate profile row (real deletion of the auth account itself requires
+            // the service_role key, which only the backend has — the account is fully
+            // deactivated here; the Express backend can hard-delete it later).
+            await supabase.from('users').update({
+              display_name: 'Former User',
+              role: 'deactivated'
+            }).eq('id', user.uid);
+
+            if (user.role === 'vet') {
+              await supabase.from('users').update({
+                vet_details: { verified: false, status: 'inactive' }
+              }).eq('id', user.uid);
+            } else if (user.role === 'ngo') {
+              await supabase.from('users').update({
+                ngo_details: { approved: false, status: 'inactive' }
+              }).eq('id', user.uid);
+            } else if (user.role === 'service_provider') {
+              await supabase.from('service_providers').update({ status: 'deactivated' }).eq('user_id', user.uid);
+            }
+
+            await supabase.auth.signOut();
+
+            showToast("Your account has been deactivated.", "info");
+            Router.navigate('/login');
+            return false;
+          } catch (err) {
+            console.error("Account deletion error:", err);
+            showToast(err.message || "Failed to deactivate account.", "error");
+            return true;
+          } finally {
+            showLoading(false);
+          }
+        }
+      });
+      initPasswordToggles();
+    };
+  }
 }
 
-/**
- * Render Settings Page
- */
 export function renderSettings() {
   const viewport = document.getElementById('app-viewport');
   const titleEl = document.getElementById('page-title');
@@ -72,8 +158,7 @@ export function renderSettings() {
 
   viewport.innerHTML = `
     <div style="max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem;">
-      
-      <!-- Theme Card -->
+
       <div class="glass-card magnetic-card">
         <h3 style="font-weight: 800; font-family:'Outfit'; margin-bottom: 1rem;"><i class="fa-solid fa-palette" style="color: var(--teal);"></i> Appearance Settings</h3>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">Configure how PawTrace looks on your browser layout.</p>
@@ -88,19 +173,17 @@ export function renderSettings() {
         </div>
       </div>
 
-      <!-- Developer Database Diagnostic Card -->
       <div class="glass-card magnetic-card">
         <h3 style="font-weight: 800; font-family:'Outfit'; margin-bottom: 1rem;"><i class="fa-solid fa-database" style="color: var(--terracotta);"></i> Connection Diagnostics</h3>
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">Verify connection credentials parameters to Firebase Services.</p>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">Verify connection to Supabase services.</p>
         <div id="connection-status-box" style="padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-glass);">
-          Fetching status...
+          Checking status...
         </div>
       </div>
-      
+
     </div>
   `;
 
-  // Bind settings theme toggle
   const themeBtn = document.getElementById('settings-theme-toggle');
   if (themeBtn) {
     themeBtn.onclick = () => {
@@ -108,29 +191,30 @@ export function renderSettings() {
     };
   }
 
-  // Populate connection check status
   const statusBox = document.getElementById('connection-status-box');
-  if (isFirebaseConfigured) {
-    statusBox.style.background = 'rgba(82, 183, 136, 0.08)';
-    statusBox.style.borderColor = 'var(--accent-green)';
-    statusBox.innerHTML = `
-      <div style="display:flex; gap:0.5rem; align-items:center; color: var(--accent-green); font-weight:700; font-size:0.9rem;">
-        <i class="fa-solid fa-circle-check"></i> Connected
-      </div>
-      <p style="font-size: 0.75rem; margin-top: 0.5rem; line-height: 1.4; color: var(--text-muted);">
-        Firestore database, Auth modules, and Cloud storage instances are online and synced with credentials.
-      </p>
-    `;
-  } else {
-    statusBox.style.background = 'rgba(244, 208, 104, 0.08)';
-    statusBox.style.borderColor = 'var(--accent-yellow)';
-    statusBox.innerHTML = `
-      <div style="display:flex; gap:0.5rem; align-items:center; color: #c99a00; font-weight:700; font-size:0.9rem;">
-        <i class="fa-solid fa-triangle-exclamation"></i> Configuration Fallback
-      </div>
-      <p style="font-size: 0.75rem; margin-top: 0.5rem; line-height: 1.4; color: var(--text-muted);">
-        Running on local mockup fallback rules. Please edit <code>firebase-config.js</code> to link your custom Firebase project keys.
-      </p>
-    `;
-  }
+  supabase.from('users').select('id').limit(1).then(({ error }) => {
+    if (!error) {
+      statusBox.style.background = 'rgba(82, 183, 136, 0.08)';
+      statusBox.style.borderColor = 'var(--accent-green)';
+      statusBox.innerHTML = `
+        <div style="display:flex; gap:0.5rem; align-items:center; color: var(--accent-green); font-weight:700; font-size:0.9rem;">
+          <i class="fa-solid fa-circle-check"></i> Connected
+        </div>
+        <p style="font-size: 0.75rem; margin-top: 0.5rem; line-height: 1.4; color: var(--text-muted);">
+          Supabase database, Auth, and Storage services are online and reachable.
+        </p>
+      `;
+    } else {
+      statusBox.style.background = 'rgba(244, 208, 104, 0.08)';
+      statusBox.style.borderColor = 'var(--accent-yellow)';
+      statusBox.innerHTML = `
+        <div style="display:flex; gap:0.5rem; align-items:center; color: #c99a00; font-weight:700; font-size:0.9rem;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Connection Issue
+        </div>
+        <p style="font-size: 0.75rem; margin-top: 0.5rem; line-height: 1.4; color: var(--text-muted);">
+          Could not reach Supabase. Check your network or project status.
+        </p>
+      `;
+    }
+  });
 }

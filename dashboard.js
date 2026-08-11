@@ -1,8 +1,8 @@
 // ==========================================================================
-// PAWTRACE OWNER DASHBOARD MODULE
+// PAWTRACE OWNER DASHBOARD MODULE (Supabase)
 // ==========================================================================
 
-import { db } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
 import { showToast, showLoading, formatFriendlyDate, getPetImageHTML } from './utils.js';
 
@@ -19,10 +19,8 @@ export async function renderDashboard() {
   const user = getCurrentUser();
   if (!user) return;
 
-  // Base layout skeleton
   viewport.innerHTML = `
     <div class="dashboard-grid">
-      <!-- Left Main Column -->
       <div>
         <div class="glass-card mb-2" style="background: linear-gradient(135deg, rgba(31, 122, 140, 0.05) 0%, rgba(219, 93, 57, 0.05) 100%); padding: 2rem;">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 800; margin-bottom: 0.5rem;">
@@ -33,7 +31,6 @@ export async function renderDashboard() {
           </p>
         </div>
 
-        <!-- Metrics Grid -->
         <div class="metric-grid">
           <div class="glass-card metric-card magnetic-card">
             <div class="metric-icon teal"><i class="fa-solid fa-paw"></i></div>
@@ -58,19 +55,17 @@ export async function renderDashboard() {
           </div>
         </div>
 
-        <!-- My Companions Shelf -->
         <div class="flex-between mb-2">
           <h3 style="font-weight: 800; font-family: 'Outfit', sans-serif; font-size: 1.25rem;">My Companions</h3>
           <a href="#/pets" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
             View All <i class="fa-solid fa-arrow-right"></i>
           </a>
         </div>
-        
+
         <div id="dashboard-pets-container" class="pets-grid mb-3">
           <div class="skeleton-container"><div class="skeleton skeleton-card"></div></div>
         </div>
 
-        <!-- Health Insights Widget -->
         <div class="glass-card mb-3">
           <h3 style="font-weight: 800; font-family: 'Outfit', sans-serif; font-size: 1.15rem; margin-bottom: 1rem; color: var(--teal);">
             <i class="fa-solid fa-wand-magic-sparkles"></i> Predictive Health Insights
@@ -81,7 +76,6 @@ export async function renderDashboard() {
         </div>
       </div>
 
-      <!-- Right Column Widgets -->
       <div>
         <h3 style="font-weight: 800; font-family: 'Outfit', sans-serif; font-size: 1.25rem; margin-bottom: 1rem;">Active Tracking Radar</h3>
         <div class="glass-card mb-2" style="padding: 0; overflow: hidden; border-radius: var(--radius-md);">
@@ -94,13 +88,11 @@ export async function renderDashboard() {
           </div>
         </div>
 
-        <!-- Active Tasks/Reminders Widget -->
         <h3 style="font-weight: 800; font-family: 'Outfit', sans-serif; font-size: 1.25rem; margin-top: 2rem; margin-bottom: 1rem;">Care Agenda</h3>
         <div id="dashboard-reminders-list" class="glass-card mb-2" style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
           <div class="skeleton skeleton-text"></div>
         </div>
 
-        <!-- Recent Scan History list -->
         <h3 style="font-weight: 800; font-family: 'Outfit', sans-serif; font-size: 1.25rem; margin-top: 2rem; margin-bottom: 1rem;">Recent Scan Log</h3>
         <div id="dashboard-scans-list" class="glass-card" style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
           <div class="empty-state-mini">
@@ -112,20 +104,21 @@ export async function renderDashboard() {
     </div>
   `;
 
-  // Destroy previous Leaflet maps context to avoid binding errors
   if (mapInstance) {
     mapInstance.remove();
     mapInstance = null;
   }
 
-  // Load Firestore Stats
-  if (!db) return;
-
   showLoading(true, "Syncing dashboard records...");
   try {
-    const petSnapshot = await db.collection('pets').where('ownerId', '==', user.uid).get();
-    
-    let total = petSnapshot.size;
+    const { data: pets, error: petsErr } = await supabase
+      .from('pets')
+      .select('*')
+      .eq('owner_id', user.uid);
+
+    if (petsErr) throw petsErr;
+
+    let total = pets.length;
     let lost = 0;
     let safe = 0;
     const petIds = [];
@@ -136,7 +129,7 @@ export async function renderDashboard() {
     }
     petsContainer.innerHTML = '';
 
-    if (petSnapshot.empty) {
+    if (pets.length === 0) {
       const totalEl = document.getElementById('metric-total-pets');
       const safeEl = document.getElementById('metric-safe-pets');
       const lostEl = document.getElementById('metric-lost-pets');
@@ -152,17 +145,15 @@ export async function renderDashboard() {
         </div>
       `;
     } else {
-      petSnapshot.forEach((doc) => {
-        const pet = doc.data();
-        pet.id = doc.id;
+      pets.forEach((pet) => {
         petIds.push(pet.id);
-        
-        if (pet.lostStatus === 'LOST') lost++;
+
+        if (pet.is_lost) lost++;
         else safe++;
 
-        const isDraft = pet.isDraft === true;
-        const badgeClass = isDraft ? 'draft' : (pet.lostStatus === 'LOST' ? 'lost' : 'safe');
-        const badgeText = isDraft ? 'DRAFT' : (pet.lostStatus || 'SAFE');
+        const isDraft = pet.is_draft === true;
+        const badgeClass = isDraft ? 'draft' : (pet.is_lost ? 'lost' : 'safe');
+        const badgeText = isDraft ? 'DRAFT' : (pet.is_lost ? 'LOST' : 'SAFE');
         const actionLink = isDraft ? `#/pet/${pet.id}/edit` : `#/pet/${pet.id}`;
         const actionText = isDraft ? '<i class="fa-solid fa-pen-to-square"></i> Edit Draft' : '<i class="fa-solid fa-folder-open"></i> View Profile';
 
@@ -170,7 +161,7 @@ export async function renderDashboard() {
         card.className = 'glass-card pet-card magnetic-card';
         card.innerHTML = `
           <div class="pet-image-container">
-            ${getPetImageHTML(pet, 'large')}
+            ${getPetImageHTML({ ...pet, profileImage: pet.photo_url, petType: pet.species }, 'large')}
             <span class="pet-status-badge ${badgeClass}">
               ${badgeText}
             </span>
@@ -178,7 +169,7 @@ export async function renderDashboard() {
           <div class="pet-card-content">
             <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center;">
               <span>${pet.name}</span>
-              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${pet.pawTraceId || 'PT-PENDING'}</span>
+              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${pet.pawtrace_id || 'PT-PENDING'}</span>
             </h4>
             <div class="pet-card-meta">
               <span>${pet.breed || 'Unknown'}</span>
@@ -203,17 +194,10 @@ export async function renderDashboard() {
       if (lostEl) lostEl.textContent = lost;
     }
 
-    // Initialize Map Box
     initDashboardRadarMap(petIds);
-
-    // Load active reminders across all pets
     await loadDashboardReminders(petIds);
-
-    // Load recent scan spottings list
     await loadRecentScanLogs(user.uid);
-
-    // Generate AI health tips recommendations
-    generateAIInsights(petSnapshot);
+    generateAIInsights(pets);
 
   } catch (error) {
     console.error("Dashboard Load Error:", error);
@@ -227,7 +211,6 @@ export async function renderDashboard() {
  * Initialize Leaflet mapping coordinates
  */
 async function initDashboardRadarMap(petIds) {
-  // Destroy previous mapInstance to prevent duplication binding errors
   if (mapInstance) {
     try {
       mapInstance.remove();
@@ -239,7 +222,6 @@ async function initDashboardRadarMap(petIds) {
 
   const mapContainer = document.getElementById('vet-map');
   if (!mapContainer || petIds.length === 0) {
-    // Default dummy map centered on SF
     mapInstance = L.map('vet-map', { dragging: !L.Browser.mobile, tap: !L.Browser.mobile, scrollWheelZoom: false }).setView([37.7749, -122.4194], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
@@ -247,7 +229,6 @@ async function initDashboardRadarMap(petIds) {
     return;
   }
 
-  // Centering defaults
   mapInstance = L.map('vet-map', { dragging: !L.Browser.mobile, tap: !L.Browser.mobile, scrollWheelZoom: false }).setView([37.7749, -122.4194], 11);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap'
@@ -257,29 +238,30 @@ async function initDashboardRadarMap(petIds) {
   let coordsAdded = false;
 
   try {
-    for (const petId of petIds) {
-      const scansSnapshot = await db.collection('pets').doc(petId).collection('scans')
-        .orderBy('timestamp', 'desc')
-        .limit(3)
-        .get();
+    const { data: scans, error } = await supabase
+      .from('scans')
+      .select('*')
+      .in('pet_id', petIds)
+      .order('created_at', { ascending: false })
+      .limit(petIds.length * 3);
 
-      scansSnapshot.forEach(doc => {
-        const scan = doc.data();
-        if (scan.latitude && scan.longitude) {
-          const popupText = `
-            <div style="font-family:'Outfit',sans-serif; font-size:0.8rem;">
-              <strong style="color:var(--terracotta);">Scan Spotting</strong><br>
-              Time: ${formatFriendlyDate(scan.timestamp)}<br>
-              <a href="${scan.mapsLink}" target="_blank" style="color:var(--teal); font-weight:600;">Directions</a>
-            </div>
-          `;
-          L.marker([scan.latitude, scan.longitude])
-            .bindPopup(popupText)
-            .addTo(markerGroup);
-          coordsAdded = true;
-        }
-      });
-    }
+    if (error) throw error;
+
+    (scans || []).forEach(scan => {
+      if (scan.latitude && scan.longitude) {
+        const popupText = `
+          <div style="font-family:'Outfit',sans-serif; font-size:0.8rem;">
+            <strong style="color:var(--terracotta);">Scan Spotting</strong><br>
+            Time: ${formatFriendlyDate(scan.created_at)}<br>
+            <a href="${scan.maps_link}" target="_blank" style="color:var(--teal); font-weight:600;">Directions</a>
+          </div>
+        `;
+        L.marker([scan.latitude, scan.longitude])
+          .bindPopup(popupText)
+          .addTo(markerGroup);
+        coordsAdded = true;
+      }
+    });
 
     if (coordsAdded) {
       mapInstance.fitBounds(markerGroup.getBounds(), { padding: [30, 30] });
@@ -307,33 +289,19 @@ async function loadDashboardReminders(petIds) {
   }
 
   try {
-    const allReminders = [];
-    
-    // Fetch reminders in parallel
-    await Promise.all(petIds.map(async (petId) => {
-      const petDoc = await db.collection('pets').doc(petId).get();
-      const petName = petDoc.data().name;
-      
-      const remSnap = await db.collection('pets').doc(petId).collection('reminders')
-        .where('completed', '==', false)
-        .limit(3)
-        .get();
-        
-      remSnap.forEach(doc => {
-        const data = doc.data();
-        data.id = doc.id;
-        data.petId = petId;
-        data.petName = petName;
-        allReminders.push(data);
-      });
-    }));
+    const { data: reminders, error } = await supabase
+      .from('reminders')
+      .select('*, pets(name)')
+      .in('pet_id', petIds)
+      .eq('is_completed', false)
+      .order('reminder_date', { ascending: true })
+      .limit(4);
 
-    // Sort client-side chronologically
-    allReminders.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-    
+    if (error) throw error;
+
     remindersBox.innerHTML = '';
 
-    if (allReminders.length === 0) {
+    if (!reminders || reminders.length === 0) {
       remindersBox.innerHTML = `
         <div class="empty-state-mini" style="padding: 1rem 0;">
           <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i>
@@ -343,12 +311,13 @@ async function loadDashboardReminders(petIds) {
       return;
     }
 
-    // Render top 4 reminders
-    allReminders.slice(0, 4).forEach(item => {
+    reminders.forEach(item => {
       let icon = 'fa-clock';
-      if (item.type === 'Vaccination') icon = 'fa-syringe';
-      if (item.type === 'Medicine') icon = 'fa-pills';
-      if (item.type === 'Vet Appointment') icon = 'fa-user-doctor';
+      if (item.reminder_type === 'Vaccination') icon = 'fa-syringe';
+      if (item.reminder_type === 'Medicine') icon = 'fa-pills';
+      if (item.reminder_type === 'Vet Appointment') icon = 'fa-user-doctor';
+
+      const petName = item.pets ? item.pets.name : '';
 
       const div = document.createElement('div');
       div.className = 'reminder-item';
@@ -360,7 +329,7 @@ async function loadDashboardReminders(petIds) {
           <i class="fa-solid ${icon}" style="color:var(--teal);"></i>
           <div class="reminder-info">
             <span class="reminder-title">${item.title}</span>
-            <span class="reminder-meta">${item.petName} &bull; ${formatFriendlyDate(item.dueDate)}</span>
+            <span class="reminder-meta">${petName} &bull; ${formatFriendlyDate(item.reminder_date)}</span>
           </div>
         </div>
       `;
@@ -381,13 +350,17 @@ async function loadRecentScanLogs(uid) {
   if (!scansList) return;
 
   try {
-    const notifySnapshot = await db.collection('users').doc(uid).collection('notifications')
-      .where('type', '==', 'QR_SCAN')
-      .orderBy('timestamp', 'desc')
-      .limit(3)
-      .get();
-      
-    if (notifySnapshot.empty) {
+    const { data: notifications, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', uid)
+      .eq('type', 'QR_SCAN')
+      .order('created_at', { ascending: false })
+      .limit(3);
+
+    if (error) throw error;
+
+    if (!notifications || notifications.length === 0) {
       scansList.innerHTML = `
         <div class="empty-state-mini" style="padding: 1rem 0;">
           <i class="fa-solid fa-map-location-dot"></i>
@@ -398,8 +371,7 @@ async function loadRecentScanLogs(uid) {
     }
 
     scansList.innerHTML = '';
-    notifySnapshot.forEach((doc) => {
-      const data = doc.data();
+    notifications.forEach((data) => {
       const item = document.createElement('div');
       item.className = 'geo-panel';
       item.style.padding = '0.75rem';
@@ -407,11 +379,11 @@ async function loadRecentScanLogs(uid) {
       item.innerHTML = `
         <div style="font-weight: 700; color: var(--terracotta); display: flex; align-items: center; justify-content: space-between;">
           <span><i class="fa-solid fa-circle-exclamation"></i> GPS Spotting Logged</span>
-          <span style="font-size:0.65rem; color:var(--text-muted);">${formatFriendlyDate(data.timestamp)}</span>
+          <span style="font-size:0.65rem; color:var(--text-muted);">${formatFriendlyDate(data.created_at)}</span>
         </div>
         <p style="margin: 0.25rem 0; line-height:1.4;">${data.message}</p>
-        ${data.mapsLink ? `
-          <a href="${data.mapsLink}" target="_blank" class="btn btn-outline mt-1" style="font-size: 0.7rem; padding: 0.35rem 0.75rem; width: fit-content;">
+        ${data.maps_link ? `
+          <a href="${data.maps_link}" target="_blank" class="btn btn-outline mt-1" style="font-size: 0.7rem; padding: 0.35rem 0.75rem; width: fit-content;">
             <i class="fa-solid fa-map-location-dot"></i> Maps Directions
           </a>
         ` : ''}
@@ -427,20 +399,19 @@ async function loadRecentScanLogs(uid) {
 /**
  * Generate client-side predictive analysis tips
  */
-function generateAIInsights(petSnapshot) {
+function generateAIInsights(pets) {
   const insightsBox = document.getElementById('health-insights-box');
   if (!insightsBox) return;
 
-  if (petSnapshot.empty) {
+  if (!pets || pets.length === 0) {
     insightsBox.innerHTML = `<p style="font-size:0.85rem; color:var(--text-muted);">Log pet details to trigger Predictive Wellness scores.</p>`;
     return;
   }
 
-  const firstPet = petSnapshot.docs[0].data();
-  
-  // Custom mock analytics based on characteristics
+  const firstPet = pets[0];
+
   let recommText = `Based on weight progression records for <strong>${firstPet.name}</strong>, their weight is stable. We suggest maintaining their current diet schedule.`;
-  if (firstPet.vaccinationStatus === 'Incomplete') {
+  if (firstPet.vaccination_status === 'Incomplete') {
     recommText = `Health Alert: <strong>${firstPet.name}</strong> has vaccination logs marked as incomplete. We forecast an elevated risk of infection; please schedule a deworming checkup soon.`;
   } else if (firstPet.weight > 35) {
     recommText = `Weight Warning: <strong>${firstPet.name}</strong>'s current weight of ${firstPet.weight}kg suggests they are in the upper range for their breed. We suggest a 10% increase in daily activity.`;

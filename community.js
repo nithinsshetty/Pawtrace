@@ -1,16 +1,13 @@
 // ==========================================================================
-// COMMUNITY FEED & SOCIAL ENGAGEMENT HUB
+// COMMUNITY FEED & SOCIAL ENGAGEMENT HUB (Supabase)
 // ==========================================================================
 
-import { db, fb } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
 import { showToast, showLoading, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate } from './utils.js';
 
 let currentFilter = 'All';
 
-/**
- * Render the main community forum dashboard
- */
 export async function renderCommunity() {
   const viewport = document.getElementById('app-viewport');
   const titleEl = document.getElementById('page-title');
@@ -27,13 +24,10 @@ export async function renderCommunity() {
       </p>
     </div>
 
-    <!-- Forum Layout Split -->
     <div style="display:grid; grid-template-columns: 2fr 1fr; gap:2rem;">
-      
-      <!-- Main Feed -->
+
       <div style="display:flex; flex-direction:column; gap:1.5rem;">
-        
-        <!-- Post creation widget -->
+
         <div class="glass-card">
           <h3 style="font-weight:700; font-family:'Outfit'; margin-bottom:1rem; color:var(--teal);">Create a Post</h3>
           <form id="community-post-form" style="display:flex; flex-direction:column; gap:0.75rem;">
@@ -50,11 +44,11 @@ export async function renderCommunity() {
                 </select>
               </div>
             </div>
-            
+
             <div class="form-group">
               <textarea id="post-content" class="form-control" rows="3" placeholder="Share tips, questions, or showcases..." required style="padding:0.6rem 1rem; font-size:0.85rem;"></textarea>
             </div>
-            
+
             <div class="flex-between">
               <div class="form-group" style="margin:0;">
                 <input type="file" id="post-photo" accept="image/*" style="font-size:0.75rem; max-width:200px;">
@@ -66,7 +60,6 @@ export async function renderCommunity() {
           </form>
         </div>
 
-        <!-- Filter Chips Bar -->
         <div style="display:flex; gap:0.5rem; overflow-x:auto; padding-bottom:0.25rem;">
           ${['All', 'showcase', 'tips', 'stories', 'qa'].map(cat => `
             <button class="btn btn-outline filter-chip ${currentFilter === cat ? 'active' : ''}" data-category="${cat}" style="padding:0.4rem 1rem; font-size:0.75rem; border-radius:var(--radius-full);">
@@ -75,14 +68,12 @@ export async function renderCommunity() {
           `).join('')}
         </div>
 
-        <!-- Dynamic Feed List -->
         <div id="community-posts-container" class="community-feed">
           <div class="skeleton-container"><div class="skeleton skeleton-card"></div></div>
         </div>
 
       </div>
 
-      <!-- Sidebar -->
       <div>
         <div class="glass-card mb-3">
           <h4 style="font-weight:700; margin-bottom:0.5rem; color:var(--terracotta);">Trending Discussions</h4>
@@ -90,24 +81,11 @@ export async function renderCommunity() {
             Participate in threads. Vets carry specialty verification badges to ensure high quality medical answers.
           </p>
         </div>
-        
+
         <div class="glass-card text-center" style="padding:1.5rem 1rem;">
           <h4 style="font-weight:700; margin-bottom:0.5rem;"><i class="fa-solid fa-award" style="color:var(--accent-yellow);"></i> Top Contributors</h4>
-          <div style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
-            <div style="display:flex; gap:0.5rem; align-items:center; text-align:left; font-size:0.8rem;">
-              <div style="width:32px; height:32px; border-radius:50%; overflow:hidden;"><img src="https://api.dicebear.com/7.x/bottts/svg?seed=dr_smith" style="width:100%; height:100%;"></div>
-              <div>
-                <strong>Dr. Clara Smith</strong> <i class="fa-solid fa-circle-check verified-icon"></i>
-                <span style="font-size:0.65rem; color:var(--text-muted); display:block;">Verfied Veterinarian</span>
-              </div>
-            </div>
-            <div style="display:flex; gap:0.5rem; align-items:center; text-align:left; font-size:0.8rem;">
-              <div style="width:32px; height:32px; border-radius:50%; overflow:hidden;"><img src="https://api.dicebear.com/7.x/bottts/svg?seed=hope_ngo" style="width:100%; height:100%;"></div>
-              <div>
-                <strong>Hope Animal Rescue</strong> <i class="fa-solid fa-shield-heart ngo-verified-icon"></i>
-                <span style="font-size:0.65rem; color:var(--text-muted); display:block;">NGO Coordinator</span>
-              </div>
-            </div>
+          <div id="top-contributors-list" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+            <div class="skeleton skeleton-text"></div>
           </div>
         </div>
       </div>
@@ -115,7 +93,6 @@ export async function renderCommunity() {
     </div>
   `;
 
-  // Bind Category click changes
   document.querySelectorAll('.filter-chip').forEach(btn => {
     btn.onclick = () => {
       document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
@@ -125,20 +102,58 @@ export async function renderCommunity() {
     };
   });
 
-  // Bind Post Creation form submit
   const postForm = document.getElementById('community-post-form');
   postForm.onsubmit = async (e) => {
     e.preventDefault();
     await createCommunityPost();
   };
 
-  // Fetch Forum Posts
   await loadCommunityPosts();
+  await loadTopContributors();
 }
 
 /**
- * Fetch posts matching current filter configurations from Firestore
+ * Real top contributors: verified vets and approved NGOs with the most posts
  */
+async function loadTopContributors() {
+  const container = document.getElementById('top-contributors-list');
+  if (!container) return;
+
+  try {
+    const { data: posts } = await supabase.from('community_posts').select('author_id');
+    const counts = {};
+    (posts || []).forEach(p => { counts[p.author_id] = (counts[p.author_id] || 0) + 1; });
+
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, display_name, role, vet_details, ngo_details')
+      .in('role', ['vet', 'ngo']);
+
+    const contributors = (users || [])
+      .filter(u => counts[u.id])
+      .map(u => ({ ...u, postCount: counts[u.id] }))
+      .sort((a, b) => b.postCount - a.postCount)
+      .slice(0, 3);
+
+    if (contributors.length === 0) {
+      container.innerHTML = `<p style="font-size:0.75rem; color:var(--text-muted);">No verified contributors yet.</p>`;
+      return;
+    }
+
+    container.innerHTML = contributors.map(c => `
+      <div style="display:flex; gap:0.5rem; align-items:center; text-align:left; font-size:0.8rem;">
+        <div style="width:32px; height:32px; border-radius:50%; overflow:hidden;"><img src="https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(c.display_name || c.id)}" style="width:100%; height:100%;"></div>
+        <div>
+          <strong>${c.display_name || 'Contributor'}</strong> ${c.role === 'vet' ? '<i class="fa-solid fa-circle-check verified-icon"></i>' : '<i class="fa-solid fa-shield-heart ngo-verified-icon"></i>'}
+          <span style="font-size:0.65rem; color:var(--text-muted); display:block;">${c.role === 'vet' ? 'Verified Veterinarian' : 'NGO Coordinator'}</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.warn("Top contributors load failed:", err);
+  }
+}
+
 async function loadCommunityPosts() {
   const container = document.getElementById('community-posts-container');
   if (!container) return;
@@ -146,16 +161,18 @@ async function loadCommunityPosts() {
   container.innerHTML = `<div class="skeleton-container"><div class="skeleton skeleton-card"></div></div>`;
 
   try {
-    let query = db.collection('community_posts').orderBy('timestamp', 'desc');
-    
+    let query = supabase.from('community_posts').select('*, users!community_posts_author_id_fkey(display_name, photo_url, role)').order('created_at', { ascending: false });
+
     if (currentFilter !== 'All') {
-      query = query.where('category', '==', currentFilter);
+      query = query.eq('category', currentFilter);
     }
 
-    const snapshot = await query.get();
+    const { data: posts, error } = await query;
+    if (error) throw error;
+
     container.innerHTML = '';
 
-    if (snapshot.empty) {
+    if (!posts || posts.length === 0) {
       container.innerHTML = `
         <div class="empty-state-mini" style="padding: 3rem 0;">
           <i class="fa-solid fa-comments"></i>
@@ -167,18 +184,15 @@ async function loadCommunityPosts() {
 
     const user = getCurrentUser();
 
-    snapshot.forEach(doc => {
-      const post = doc.data();
-      post.id = doc.id;
-
+    posts.forEach(post => {
+      const author = post.users || {};
       const isLiked = post.likes && post.likes.includes(user.uid);
       const likesCount = post.likes ? post.likes.length : 0;
 
-      // Select verified badge markup according to user role
       let roleBadge = '';
-      if (post.authorRole === 'vet') {
+      if (author.role === 'vet') {
         roleBadge = `<span class="post-badge vet"><i class="fa-solid fa-stethoscope"></i> Vet <i class="fa-solid fa-circle-check verified-icon" style="font-size:0.6rem;"></i></span>`;
-      } else if (post.authorRole === 'ngo') {
+      } else if (author.role === 'ngo') {
         roleBadge = `<span class="post-badge ngo"><i class="fa-solid fa-handshake-angle"></i> Rescue <i class="fa-solid fa-shield-heart ngo-verified-icon" style="font-size:0.6rem;"></i></span>`;
       } else {
         roleBadge = `<span class="post-badge owner">Guardian</span>`;
@@ -189,20 +203,19 @@ async function loadCommunityPosts() {
       card.innerHTML = `
         <div class="post-header">
           <div class="post-avatar">
-            <img src="${post.authorAvatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + post.authorName}" style="width:100%; height:100%; object-fit:cover;">
+            <img src="${author.photo_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + (author.display_name || post.author_id)}" style="width:100%; height:100%; object-fit:cover;">
           </div>
           <div class="post-meta">
-            <span class="post-author">${post.authorName} ${roleBadge}</span>
-            <span class="post-time">${formatFriendlyDate(post.timestamp)}</span>
+            <span class="post-author">${author.display_name || 'PawTrace User'} ${roleBadge}</span>
+            <span class="post-time">${formatFriendlyDate(post.created_at)}</span>
           </div>
         </div>
 
         <h3 class="post-title">${post.title}</h3>
         <p class="post-body">${post.content}</p>
-        
-        ${post.photo ? `<img src="${post.photo}" class="post-image" alt="Milestone Photo">` : ''}
 
-        <!-- Engagement Buttons -->
+        ${post.photo_url ? `<img src="${post.photo_url}" class="post-image" alt="Milestone Photo">` : ''}
+
         <div class="post-actions">
           <button class="post-action-btn btn-like ${isLiked ? 'liked' : ''}" data-id="${post.id}" data-liked="${isLiked}">
             <i class="fa-solid fa-heart"></i> <span>Likes (${likesCount})</span>
@@ -212,7 +225,6 @@ async function loadCommunityPosts() {
           </button>
         </div>
 
-        <!-- Comments Drawer -->
         <div id="comments-drawer-${post.id}" class="comments-box hidden">
           <div class="comment-input-row">
             <input type="text" id="comment-input-${post.id}" class="form-control" placeholder="Write a comment..." style="padding:0.4rem 0.8rem; font-size:0.8rem;">
@@ -221,7 +233,6 @@ async function loadCommunityPosts() {
             </button>
           </div>
           <div id="comments-list-${post.id}" class="comment-list">
-            <!-- Dynamically populated comments -->
           </div>
         </div>
       `;
@@ -229,7 +240,6 @@ async function loadCommunityPosts() {
       container.appendChild(card);
     });
 
-    // Bind Engagement Clicks
     bindEngagementListeners(container);
 
   } catch (err) {
@@ -238,32 +248,29 @@ async function loadCommunityPosts() {
   }
 }
 
-/**
- * Configure likes toggling and comments panel rendering
- */
 function bindEngagementListeners(feedContainer) {
   const user = getCurrentUser();
 
-  // 1. Likes Handlers
   feedContainer.querySelectorAll('.btn-like').forEach(btn => {
     btn.onclick = async () => {
       const postId = btn.getAttribute('data-id');
       const liked = btn.getAttribute('data-liked') === 'true';
-      
+
       btn.disabled = true;
       try {
-        const postRef = db.collection('community_posts').doc(postId);
+        const { data: post, error: fetchErr } = await supabase.from('community_posts').select('likes').eq('id', postId).single();
+        if (fetchErr) throw fetchErr;
+
+        let updatedLikes = post.likes || [];
         if (liked) {
-          // Remove like
-          await postRef.update({
-            likes: fb.firestore.FieldValue.arrayRemove(user.uid)
-          });
+          updatedLikes = updatedLikes.filter(id => id !== user.uid);
         } else {
-          // Add like
-          await postRef.update({
-            likes: fb.firestore.FieldValue.arrayUnion(user.uid)
-          });
+          updatedLikes = [...updatedLikes, user.uid];
         }
+
+        const { error: updateErr } = await supabase.from('community_posts').update({ likes: updatedLikes }).eq('id', postId);
+        if (updateErr) throw updateErr;
+
         loadCommunityPosts();
       } catch (err) {
         console.warn("Likes update failure:", err);
@@ -273,7 +280,6 @@ function bindEngagementListeners(feedContainer) {
     };
   });
 
-  // 2. Comments Drawer Toggles
   feedContainer.querySelectorAll('.btn-comment-toggle').forEach(btn => {
     btn.onclick = () => {
       const postId = btn.getAttribute('data-id');
@@ -285,7 +291,6 @@ function bindEngagementListeners(feedContainer) {
     };
   });
 
-  // 3. Comment Submission
   feedContainer.querySelectorAll('.btn-submit-comment').forEach(btn => {
     btn.onclick = async () => {
       const postId = btn.getAttribute('data-id');
@@ -296,12 +301,12 @@ function bindEngagementListeners(feedContainer) {
 
       btn.disabled = true;
       try {
-        await db.collection('community_posts').doc(postId).collection('comments').add({
-          authorId: user.uid,
-          authorName: user.displayName || user.email.split('@')[0],
-          content: text,
-          timestamp: fb.firestore.FieldValue.serverTimestamp()
+        const { error } = await supabase.from('community_comments').insert({
+          post_id: postId,
+          author_id: user.uid,
+          content: text
         });
+        if (error) throw error;
 
         input.value = '';
         showToast("Comment published successfully.", "success");
@@ -321,25 +326,28 @@ async function loadCommentsFeed(postId) {
 
   container.innerHTML = `<div class="skeleton skeleton-text"></div>`;
   try {
-    const snapshot = await db.collection('community_posts').doc(postId).collection('comments')
-      .orderBy('timestamp', 'asc')
-      .get();
-      
+    const { data: comments, error } = await supabase
+      .from('community_comments')
+      .select('*, users!community_comments_author_id_fkey(display_name)')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
     container.innerHTML = '';
 
-    if (snapshot.empty) {
+    if (!comments || comments.length === 0) {
       container.innerHTML = `<p style="font-size:0.75rem; color:var(--text-muted);">No comments yet. Start the discussion!</p>`;
       return;
     }
 
-    snapshot.forEach(doc => {
-      const c = doc.data();
+    comments.forEach(c => {
       const div = document.createElement('div');
       div.className = 'comment-item';
       div.innerHTML = `
         <div class="comment-author-row">
-          <strong style="color:var(--teal);">${c.authorName}</strong>
-          <span style="font-size:0.65rem; color:var(--text-muted);">${formatFriendlyDate(c.timestamp)}</span>
+          <strong style="color:var(--teal);">${(c.users && c.users.display_name) || 'PawTrace User'}</strong>
+          <span style="font-size:0.65rem; color:var(--text-muted);">${formatFriendlyDate(c.created_at)}</span>
         </div>
         <p style="margin:0; font-size:0.8rem; line-height:1.3;">${c.content}</p>
       `;
@@ -351,9 +359,6 @@ async function loadCommentsFeed(postId) {
   }
 }
 
-/**
- * Handle new post submission
- */
 async function createCommunityPost() {
   const title = document.getElementById('post-title').value.trim();
   const category = document.getElementById('post-category').value;
@@ -361,7 +366,7 @@ async function createCommunityPost() {
   const photoInput = document.getElementById('post-photo');
 
   const user = getCurrentUser();
-  if (!user || !db) return;
+  if (!user) return;
 
   let photoUrl = '';
   if (photoInput.files.length > 0) {
@@ -371,43 +376,29 @@ async function createCommunityPost() {
       showToast(error, "warning");
       return;
     }
-    try {
-      photoUrl = await readFileAsDataURL(file);
-    } catch (err) {
-      console.warn("Base64 reading failure:", err);
-    }
+    photoUrl = await readFileAsDataURL(file);
   }
 
   showLoading(true, "Publishing board post...");
   try {
-    // Resolve user role
-    let authorRole = 'owner';
-    const userDoc = await db.collection('users').doc(user.uid).get();
-    if (userDoc.exists) {
-      authorRole = userDoc.data().role || 'owner';
-    }
-
-    await db.collection('community_posts').add({
-      authorId: user.uid,
-      authorName: user.displayName || user.email.split('@')[0],
-      authorAvatar: user.photoURL || '',
-      authorRole: authorRole,
+    const { error } = await supabase.from('community_posts').insert({
+      author_id: user.uid,
       title,
       content,
-      photo: photoUrl,
-      likes: [],
+      photo_url: photoUrl,
       category,
-      timestamp: fb.firestore.FieldValue.serverTimestamp()
+      likes: []
     });
+    if (error) throw error;
 
     showToast("Post shared with PawTrace community!", "success");
-    
-    // Reset forms
+
     document.getElementById('post-title').value = '';
     document.getElementById('post-content').value = '';
     photoInput.value = '';
 
     loadCommunityPosts();
+    loadTopContributors();
   } catch (err) {
     console.error("Posting Error:", err);
     showToast("Failed to share post.", "error");

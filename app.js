@@ -4,8 +4,8 @@
 
 import { Router } from './router.js';
 import { initAuth, subscribeToAuthChanges, signOut, getRouterAuthState, getCurrentUser } from './auth.js';
-import { checkFirebaseSetup, showToast, showLoading, formatFriendlyDate } from './utils.js';
-import { db } from './firebase-config.js';
+import { showToast, showLoading, formatFriendlyDate } from './utils.js';
+import { supabase } from './supabase-config.js';
 
 // Route Rendering Modules
 import { renderLogin, renderSignup } from './pages.js';
@@ -26,13 +26,16 @@ import { renderAdminDashboard, renderAdminLogin, ADMIN_EMAILS } from './admin.js
 import { renderOrders } from './orders.js';
 import { renderAdoptionCenter } from './adoptions-client.js';
 import { renderPortfolio } from './portfolio.js';
+import { renderServices } from './services.js';
+import { renderServicePortal } from './service-portal.js';
+import { renderMarketplace, renderCreateListing } from './listings.js';
 
 
-// Real-time notifications unsubscribe listener
-let notificationListener = null;
+// Real-time notifications unsubscribe reference (Supabase Realtime channel)
+let notificationChannel = null;
 
 // App Build Version tracking
-const BUILD_VERSION = '2.0.9';
+const BUILD_VERSION = '2.1.0';
 
 // Initialize app configuration
 document.addEventListener('DOMContentLoaded', () => {
@@ -41,12 +44,11 @@ document.addEventListener('DOMContentLoaded', () => {
   setupRoutes();
   Router.setAuthCheck(getRouterAuthState);
   initializeTheme(); // calls Router.init()
-  
+
   // Register Service Worker for PWA compliance
   if ('serviceWorker' in navigator) {
     let refreshing = false;
 
-    // Detect when a new service worker takes control and force refresh the page
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!refreshing) {
         refreshing = true;
@@ -58,11 +60,8 @@ document.addEventListener('DOMContentLoaded', () => {
     navigator.serviceWorker.register('./sw.js')
       .then(reg => {
         console.log('PawTrace PWA: Service Worker registered', reg.scope);
-        
-        // Check for updates on load
         reg.update();
 
-        // Listen for new service worker installs
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           if (newWorker) {
@@ -77,10 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .catch(err => console.warn('PawTrace PWA: Service Worker registration failed', err));
   }
-  
+
   // Listen to Auth State Changes
   subscribeToAuthChanges(handleAuthStateChange);
-  
+
   // Start Auth flow
   initAuth();
 });
@@ -91,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupRoutes() {
   Router.add('/login', renderLogin, false);
   Router.add('/signup', renderSignup, false);
-  
+
   Router.add('/dashboard', renderDashboard, true);
   Router.add('/pets', renderPets, true);
   Router.add('/pet/register', renderPetRegisterWizard, true);
@@ -100,7 +99,7 @@ function setupRoutes() {
   Router.add('/pet/:id/medical', renderMedical, true);
   Router.add('/pet/:id/reminders', renderReminders, true);
   Router.add('/pet/:id/journal', renderJournal, true);
-  
+
   Router.add('/scan/:id', renderScanPage, false);
   Router.add('/caregiver/:token', renderCaregiver, false);
   Router.add('/lost-pets', renderLostPets, true);
@@ -116,9 +115,11 @@ function setupRoutes() {
   Router.add('/orders', renderOrders, true);
   Router.add('/adoption-center', renderAdoptionCenter, false);
   Router.add('/portfolio', renderPortfolio, false);
-
-
-  // NGO Portal Sub-routes (unified command center under /ngo)
+  Router.add('/services', renderServices, true);
+  Router.add('/service-portal', renderServicePortal, true);
+  Router.add('/marketplace', renderMarketplace, true);
+  Router.add('/marketplace/new', renderCreateListing, true);
+  Router.add('/marketplace/new/:petId', renderCreateListing, true);
 
   // Vet Portal Sub-routes
   Router.add('/vet-portal/dashboard', renderVetPortal, true);
@@ -129,7 +130,9 @@ function setupRoutes() {
 }
 
 /**
- * Handle UI visibility and notification streams on Authentication changes
+ * Handle UI visibility and notification streams on Authentication changes.
+ * NOTE: `user` here is the currentUser object built in auth.js, which already
+ * includes `role` (loaded once at login) — no need to re-query the database.
  */
 async function handleAuthStateChange(user, isReady) {
   if (!isReady) return;
@@ -140,22 +143,13 @@ async function handleAuthStateChange(user, isReady) {
   const container = document.getElementById('app-container');
 
   if (user) {
-    // Retrieve full profile from Firestore to display role-aware indicators
+    const role = user.role || 'customer';
     let roleText = "Pet Owner";
-    let role = "customer";
-    try {
-      const userDoc = await db.collection('users').doc(user.uid).get();
-      if (userDoc.exists) {
-        role = userDoc.data().role;
-        if (role === 'vet') roleText = "Veterinarian";
-        else if (role === 'ngo') roleText = "Rescue Organization";
-        else if (role === 'admin') roleText = "Administrator";
-      }
-    } catch (err) {
-      console.warn("Error resolving user role details from Firestore:", err);
-    }
+    if (role === 'vet') roleText = "Veterinarian";
+    else if (role === 'ngo') roleText = "Rescue Organization";
+    else if (role === 'admin') roleText = "Administrator";
+    else if (role === 'service_provider') roleText = "Service Provider";
 
-    // Run portal guards and dynamically render active sidebar layout
     await checkPortalGuards(user, window.location.hash);
     const portalContext = getPortalContext(window.location.hash, user, role);
     await updateSidebarForRole(portalContext, user, role);
@@ -169,148 +163,153 @@ async function handleAuthStateChange(user, isReady) {
       mobileNav.classList.add('hidden');
       if (container) container.classList.add('logged-out');
     } else {
-      // User is authenticated, adjust shell UI visibility
       sidebar.classList.remove('hidden');
       navbar.classList.remove('hidden');
       if (container) container.classList.remove('logged-out');
-      
-      // Check if on mobile breakpoint for bottom nav bar
+
       if (window.innerWidth <= 768) {
         mobileNav.classList.remove('hidden');
       }
     }
 
-
-    // Update Profile QuickCard in sidebar
     const sideName = document.getElementById('sidebar-user-name');
     const sideAvatar = document.getElementById('sidebar-user-avatar');
     const sideRole = document.getElementById('sidebar-user-role');
-    
+
     if (sideName) sideName.textContent = user.displayName || user.email.split('@')[0];
     if (sideRole) sideRole.textContent = roleText;
     if (sideAvatar && user.photoURL) {
       sideAvatar.src = user.photoURL;
     }
 
-    // Run verification setup check
-    checkFirebaseSetup();
-
-    // Start listening to notifications
     startNotificationListener(user.uid);
   } else {
-    // User signed out, hide navigation shells
     sidebar.classList.add('hidden');
     navbar.classList.add('hidden');
     mobileNav.classList.add('hidden');
     if (container) container.classList.add('logged-out');
-    
-    // Clear portal context on logout
+
     sessionStorage.removeItem('portal_context');
-    
-    // Stop listening to notifications
+
     stopNotificationListener();
   }
 }
 
 /**
- * Set up real-time listener to users/{uid}/notifications in Firestore
+ * Fetch current notifications and render into the dropdown panel
+ */
+async function fetchAndRenderNotifications(uid) {
+  const listContainer = document.getElementById('notification-list');
+  if (!listContainer) return;
+
+  const { data: notifications, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', uid)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    console.error("Notification fetch error:", error);
+    return;
+  }
+
+  let unreadCount = 0;
+  listContainer.innerHTML = '';
+
+  if (!notifications || notifications.length === 0) {
+    listContainer.innerHTML = `
+      <div class="empty-state-mini">
+        <i class="fa-solid fa-bell-slash"></i>
+        <p>All caught up!</p>
+      </div>
+    `;
+    updateNotificationBadge(0);
+    return;
+  }
+
+  notifications.forEach((data) => {
+    if (!data.is_read) unreadCount++;
+
+    const item = document.createElement('div');
+    item.className = `notification-item ${data.type === 'QR_SCAN' ? 'scan-alert' : ''}`;
+
+    let title = "Alert";
+    let icon = "fa-bell";
+
+    if (data.type === 'QR_SCAN') {
+      title = "QR Tag Scanned";
+      icon = "fa-location-crosshairs";
+    } else if (data.type === 'REMINDER') {
+      title = "Reminder Due";
+      icon = "fa-clock";
+    } else if (data.type === 'STATUS_CHANGE') {
+      title = "Status Update";
+      icon = "fa-paw";
+    }
+
+    let mapMarkup = '';
+    if (data.maps_link) {
+      mapMarkup = `
+        <a href="${data.maps_link}" target="_blank" class="notification-map-link">
+          <i class="fa-solid fa-map-location-dot"></i> View on Google Maps
+        </a>
+      `;
+    }
+
+    item.innerHTML = `
+      <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+        <i class="fa-solid ${icon}" style="margin-top: 0.2rem; color: var(--terracotta);"></i>
+        <div>
+          <strong style="display:block; font-size: 0.85rem;">${title}</strong>
+          <p style="margin: 0.2rem 0; font-size: 0.8rem;">${data.message}</p>
+          ${mapMarkup}
+          <div class="notification-time">${formatFriendlyDate(data.created_at)}</div>
+        </div>
+      </div>
+    `;
+    listContainer.appendChild(item);
+  });
+
+  updateNotificationBadge(unreadCount);
+}
+
+/**
+ * Set up Supabase Realtime subscription for this user's notifications.
+ * Fetches current state immediately, then re-fetches on any change.
  */
 function startNotificationListener(uid) {
-  if (!db) return;
-  
   stopNotificationListener(); // safety clear
 
-  try {
-    notificationListener = db.collection('users').doc(uid).collection('notifications')
-      .orderBy('timestamp', 'desc')
-      .limit(10)
-      .onSnapshot((snapshot) => {
-        let unreadCount = 0;
-        const listContainer = document.getElementById('notification-list');
-        if (!listContainer) return;
-        
-        listContainer.innerHTML = '';
-        
-        if (snapshot.empty) {
-          listContainer.innerHTML = `
-            <div class="empty-state-mini">
-              <i class="fa-solid fa-bell-slash"></i>
-              <p>All caught up!</p>
-            </div>
-          `;
-          updateNotificationBadge(0);
-          return;
+  fetchAndRenderNotifications(uid);
+
+  notificationChannel = supabase
+    .channel(`notifications:${uid}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
+      (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const data = payload.new;
+          showToast(data.message, data.type === 'QR_SCAN' ? 'warning' : 'info');
         }
-
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          if (!data.read) unreadCount++;
-
-          const item = document.createElement('div');
-          item.className = `notification-item ${data.type === 'QR_SCAN' ? 'scan-alert' : ''}`;
-          
-          let title = "Alert";
-          let icon = "fa-bell";
-          
-          if (data.type === 'QR_SCAN') {
-            title = "QR Tag Scanned";
-            icon = "fa-location-crosshairs";
-          } else if (data.type === 'REMINDER') {
-            title = "Reminder Due";
-            icon = "fa-clock";
-          } else if (data.type === 'STATUS_CHANGE') {
-            title = "Status Update";
-            icon = "fa-paw";
-          }
-
-          let mapMarkup = '';
-          if (data.mapsLink) {
-            mapMarkup = `
-              <a href="${data.mapsLink}" target="_blank" class="notification-map-link">
-                <i class="fa-solid fa-map-location-dot"></i> View on Google Maps
-              </a>
-            `;
-          }
-
-          item.innerHTML = `
-            <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
-              <i class="fa-solid ${icon}" style="margin-top: 0.2rem; color: var(--terracotta);"></i>
-              <div>
-                <strong style="display:block; font-size: 0.85rem;">${title}</strong>
-                <p style="margin: 0.2rem 0; font-size: 0.8rem;">${data.message}</p>
-                ${mapMarkup}
-                <div class="notification-time">${formatFriendlyDate(data.timestamp)}</div>
-              </div>
-            </div>
-          `;
-          listContainer.appendChild(item);
-
-          // If this is a fresh doc during session, trigger a Toast popup
-          if (!data.read && data.timestamp && (Date.now() - (data.timestamp.toDate ? data.timestamp.toDate().getTime() : data.timestamp)) < 15000) {
-            showToast(data.message, data.type === 'QR_SCAN' ? 'warning' : 'info');
-          }
-        });
-
-        updateNotificationBadge(unreadCount);
-      }, (error) => {
-        console.error("Notification listener error:", error);
-      });
-  } catch (error) {
-    console.error("Failed to start notifications watcher:", error);
-  }
+        fetchAndRenderNotifications(uid);
+      }
+    )
+    .subscribe();
 }
 
 function stopNotificationListener() {
-  if (notificationListener) {
-    notificationListener();
-    notificationListener = null;
+  if (notificationChannel) {
+    supabase.removeChannel(notificationChannel);
+    notificationChannel = null;
   }
 }
 
 function updateNotificationBadge(count) {
   const badge = document.getElementById('notification-badge');
   if (!badge) return;
-  
+
   if (count > 0) {
     badge.textContent = count;
     badge.classList.remove('hidden');
@@ -323,11 +322,9 @@ function updateNotificationBadge(count) {
  * Configure DOM Event Listeners for sidebars, bells, toggles, logout, drawer overlays
  */
 function setupGlobalDOMEvents() {
-  // Sidebar Toggles for responsive layouts
   const menuBtn = document.getElementById('sidebar-toggle');
   const sidebar = document.getElementById('app-sidebar');
-  
-  // Create Sidebar Mobile overlay if not existing
+
   let overlay = document.querySelector('.sidebar-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -347,7 +344,6 @@ function setupGlobalDOMEvents() {
     };
   }
 
-  // Watch for router route changes to close mobile side drawer automatically
   window.addEventListener('hashchange', async () => {
     const sidebar = document.getElementById('app-sidebar');
     const navbar = document.getElementById('app-navbar');
@@ -357,21 +353,11 @@ function setupGlobalDOMEvents() {
     const user = getCurrentUser();
     if (user) {
       await checkPortalGuards(user, window.location.hash);
-      
-      let role = 'customer';
-      try {
-        const userDoc = await db.collection('users').doc(user.uid).get();
-        if (userDoc.exists) {
-          role = userDoc.data().role;
-        }
-      } catch (err) {
-        console.warn("Error resolving user role on hashchange:", err);
-      }
-      
+
+      const role = user.role || 'customer';
       const portalContext = getPortalContext(window.location.hash, user, role);
       await updateSidebarForRole(portalContext, user, role);
 
-      // Dynamically show/hide sidebar based on active page route for logged in users
       const hash = window.location.hash || '#/dashboard';
       const isFullWidthPage = ['#/login', '#/signup', '#/admin/login', '#/portfolio'].includes(hash) || hash.startsWith('#/scan/') || hash.startsWith('#/caregiver/');
 
@@ -396,8 +382,6 @@ function setupGlobalDOMEvents() {
     }
   });
 
-
-  // Notification panel toggle dropdown
   const notifBtn = document.getElementById('notification-toggle');
   const notifPanel = document.getElementById('notification-panel');
   if (notifBtn && notifPanel) {
@@ -412,21 +396,21 @@ function setupGlobalDOMEvents() {
       }
     });
 
-    // Clear notifications callback
     const clearBtn = document.getElementById('clear-notifications');
     if (clearBtn) {
       clearBtn.onclick = async () => {
         const user = getCurrentUser();
-        if (!user || !db) return;
-        
+        if (!user) return;
+
         try {
-          const snapshot = await db.collection('users').doc(user.uid).collection('notifications').get();
-          const batch = db.batch();
-          snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
-          });
-          await batch.commit();
+          const { error } = await supabase
+            .from('notifications')
+            .delete()
+            .eq('user_id', user.uid);
+
+          if (error) throw error;
           showToast("Notifications cleared.", "info");
+          fetchAndRenderNotifications(user.uid);
         } catch (error) {
           console.error("Error clearing notifications:", error);
           showToast("Failed to clear notifications.", "error");
@@ -435,7 +419,6 @@ function setupGlobalDOMEvents() {
     }
   }
 
-  // Sign out button setup
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
     logoutBtn.onclick = () => {
@@ -443,7 +426,6 @@ function setupGlobalDOMEvents() {
     };
   }
 
-  // Dark Mode switcher
   const themeToggle = document.getElementById('theme-toggle');
   if (themeToggle) {
     themeToggle.onclick = () => {
@@ -451,7 +433,6 @@ function setupGlobalDOMEvents() {
     };
   }
 
-  // Listen to mobile nav items resize checks
   window.onresize = () => {
     const mobileNav = document.getElementById('mobile-nav');
     const user = getCurrentUser();
@@ -471,7 +452,7 @@ function setupGlobalDOMEvents() {
 function initializeTheme() {
   const currentTheme = localStorage.getItem('theme') || 'light';
   const toggleIcon = document.querySelector('#theme-toggle i');
-  
+
   if (currentTheme === 'dark') {
     document.body.classList.add('dark-theme');
     if (toggleIcon) {
@@ -483,8 +464,7 @@ function initializeTheme() {
       toggleIcon.className = 'fa-solid fa-moon';
     }
   }
-  
-  // Hide fullscreen screen loader once DOM is parsed and configured
+
   showLoading(false);
   Router.init();
 }
@@ -511,6 +491,7 @@ export function getPageType(hash) {
   if (hash.startsWith('#/admin')) return 'admin';
   if (hash.startsWith('#/vet-portal')) return 'vet';
   if (hash.startsWith('#/ngo')) return 'ngo';
+  if (hash.startsWith('#/service-portal')) return 'service_provider';
   return 'customer';
 }
 
@@ -523,7 +504,6 @@ export function getPortalContext(hash, user, role = 'customer') {
     return 'customer';
   }
 
-  // Explicit portal routes set/override the context
   if (hash.startsWith('#/admin')) {
     sessionStorage.setItem('portal_context', 'admin');
     return 'admin';
@@ -536,79 +516,78 @@ export function getPortalContext(hash, user, role = 'customer') {
     sessionStorage.setItem('portal_context', 'ngo');
     return 'ngo';
   }
+  if (hash.startsWith('#/service-portal')) {
+    sessionStorage.setItem('portal_context', 'service_provider');
+    return 'service_provider';
+  }
   if (hash === '#/dashboard' || hash.startsWith('#/pets') || hash.startsWith('#/orders') || hash.startsWith('#/pet/') || hash === '#/adoption-center') {
     sessionStorage.setItem('portal_context', 'customer');
     return 'customer';
   }
 
-  // Shared sub-pages preserve the active context if existing, otherwise default to user role
   const savedContext = sessionStorage.getItem('portal_context');
   if (savedContext) {
     return savedContext;
   }
 
-  // Default context fallback based on database role
   let context = 'customer';
   if (role === 'vet') context = 'vet';
   else if (role === 'ngo') context = 'ngo';
   else if (role === 'admin') context = 'admin';
+  else if (role === 'service_provider') context = 'service_provider';
 
   sessionStorage.setItem('portal_context', context);
   return context;
 }
 
 /**
- * Portal guards checking and role-based redirects
+ * Portal guards checking and role-based redirects.
+ * `user` already carries `.role` from auth.js — no database query needed here.
  */
 export async function checkPortalGuards(user, hash) {
-  if (!user || !db) return;
-  
-  try {
-    const userDoc = await db.collection('users').doc(user.uid).get();
-    if (!userDoc.exists) return;
-    
-    const role = userDoc.data().role;
-    const pageType = getPageType(hash);
+  if (!user) return;
 
-    // Redirect logged-in users from guest auth pages to their dashboards
-    if (hash === '#/login' || hash === '#/signup') {
-      if (role === 'vet') Router.navigate('/vet-portal');
-      else if (role === 'ngo') Router.navigate('/ngo');
-      else if (role === 'admin' || ADMIN_EMAILS.includes(user.email)) Router.navigate('/admin');
-      else Router.navigate('/dashboard');
-      return;
-    }
+  const role = user.role || 'customer';
+  const pageType = getPageType(hash);
 
-    // Vet Portal Guards
-    if (role === 'vet' && (pageType === 'customer' || pageType === 'admin')) {
-      if (hash !== '#/community' && hash !== '#/settings' && hash !== '#/profile' && hash !== '#/adoption-center') {
-        console.warn("Portal Guard: Redirecting Vet to Clinical Board.");
-        Router.navigate('/vet-portal');
-      }
+  if (hash === '#/login' || hash === '#/signup') {
+    if (role === 'vet') Router.navigate('/vet-portal');
+    else if (role === 'ngo') Router.navigate('/ngo');
+    else if (role === 'service_provider') Router.navigate('/service-portal');
+    else if (role === 'admin' || ADMIN_EMAILS.includes(user.email)) Router.navigate('/admin');
+    else Router.navigate('/dashboard');
+    return;
+  }
+
+  if (role === 'vet' && (pageType === 'customer' || pageType === 'admin')) {
+    if (hash !== '#/community' && hash !== '#/settings' && hash !== '#/profile' && hash !== '#/adoption-center') {
+      console.warn("Portal Guard: Redirecting Vet to Clinical Board.");
+      Router.navigate('/vet-portal');
     }
-    // NGO Portal Guards
-    else if (role === 'ngo' && (pageType === 'customer' || pageType === 'admin')) {
-      if (hash !== '#/community' && hash !== '#/settings' && hash !== '#/profile' && hash !== '#/lost-pets' && hash !== '#/adoption-center') {
-        console.warn("Portal Guard: Redirecting NGO to Rescue Hub.");
-        Router.navigate('/ngo');
-      }
+  }
+  else if (role === 'ngo' && (pageType === 'customer' || pageType === 'admin')) {
+    if (hash !== '#/community' && hash !== '#/settings' && hash !== '#/profile' && hash !== '#/lost-pets' && hash !== '#/adoption-center') {
+      console.warn("Portal Guard: Redirecting NGO to Rescue Hub.");
+      Router.navigate('/ngo');
     }
-    // Admin Portal Guards
-    else if ((role === 'admin' || ADMIN_EMAILS.includes(user.email)) && pageType !== 'admin') {
-      if (hash !== '#/profile' && hash !== '#/settings') {
-        console.warn("Portal Guard: Redirecting Admin to Admin Console.");
-        Router.navigate('/admin');
-      }
+  }
+  else if (role === 'service_provider' && (pageType === 'customer' || pageType === 'admin')) {
+    if (hash !== '#/community' && hash !== '#/settings' && hash !== '#/profile' && hash !== '#/adoption-center') {
+      console.warn("Portal Guard: Redirecting Service Provider to Service Portal.");
+      Router.navigate('/service-portal');
     }
-    // Customer Portal Guards
-    else if (role === 'owner' || role === 'customer' || !role) {
-      if (pageType === 'admin' || pageType === 'vet' || pageType === 'ngo') {
-        console.warn("Portal Guard: Redirecting Customer to Dashboard.");
-        Router.navigate('/dashboard');
-      }
+  }
+  else if ((role === 'admin' || ADMIN_EMAILS.includes(user.email)) && pageType !== 'admin') {
+    if (hash !== '#/profile' && hash !== '#/settings') {
+      console.warn("Portal Guard: Redirecting Admin to Admin Console.");
+      Router.navigate('/admin');
     }
-  } catch (e) {
-    console.error("Portal guards evaluation failed:", e);
+  }
+  else if (role === 'owner' || role === 'customer' || !role) {
+    if (pageType === 'admin' || pageType === 'vet' || pageType === 'ngo' || pageType === 'service_provider') {
+      console.warn("Portal Guard: Redirecting Customer to Dashboard.");
+      Router.navigate('/dashboard');
+    }
   }
 }
 
@@ -616,12 +595,10 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
   const sidebarMenu = document.querySelector('.sidebar-menu');
   if (!sidebarMenu) return;
 
-  // If the correct sidebar is already rendered, do not rebuild it.
-  // This prevents resetting scroll state, active menu highlighting, and tab states.
   if (sidebarMenu.dataset.context === portalContext) {
     return;
   }
-  
+
   sidebarMenu.dataset.context = portalContext;
 
   if (portalContext === 'admin') {
@@ -650,6 +627,14 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
         <i class="fa-solid fa-bullhorn"></i>
         <span>Broadcast</span>
       </a>
+      <a href="javascript:void(0);" class="menu-item" data-tab="providers" onclick="window.Admin.showTab('providers')">
+        <i class="fa-solid fa-user-check"></i>
+        <span>Service Partners</span>
+      </a>
+      <a href="javascript:void(0);" class="menu-item" data-tab="reports" onclick="window.Admin.showTab('reports')">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>Flagged Reports</span>
+      </a>
       <a href="#/dashboard" class="menu-item">
         <i class="fa-solid fa-arrow-left"></i>
         <span>Exit Portal</span>
@@ -662,17 +647,15 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
         <span>Clinical Board</span>
       </a>
       <a href="#/vet-portal/patients" class="menu-item" id="nav-vet-patients">
-        <i class="fa-solid fa-folder-medical"></i>
+        <i class="fa-solid fa-file-medical"></i>
         <span>Patient Records</span>
       </a>
       <a href="#/vet-portal/community" class="menu-item" id="nav-vet-community">
         <i class="fa-solid fa-users"></i>
         <span>Community</span>
       </a>
-      <a href="#/vet-portal/settings" class="menu-item" id="nav-vet-settings">
-        <i class="fa-solid fa-sliders"></i>
-        <span>Settings</span>
-      </a>
+      <a href="#/vet-portal/profile" class="menu-item" id="nav-vet-profile"><i class="fa-solid fa-user-gear"></i><span>Account Profile</span></a>
+      
     `;
   } else if (portalContext === 'ngo') {
     sidebarMenu.innerHTML = `
@@ -683,6 +666,21 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
       <a href="#/community" class="menu-item">
         <i class="fa-solid fa-users"></i>
         <span>Community</span>
+      </a>
+      <a href="#/profile" class="menu-item">
+        <i class="fa-solid fa-user-gear"></i>
+        <span>Profile Settings</span>
+      </a>
+    `;
+  } else if (portalContext === 'service_provider') {
+    sidebarMenu.innerHTML = `
+      <a href="#/service-portal" class="menu-item" id="nav-service-portal">
+        <i class="fa-solid fa-handshake-angle"></i>
+        <span>Service Portal</span>
+      </a>
+      <a href="#/community" class="menu-item">
+        <i class="fa-solid fa-users"></i>
+        <span>Community Feed</span>
       </a>
       <a href="#/profile" class="menu-item">
         <i class="fa-solid fa-user-gear"></i>
@@ -712,6 +710,13 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
           <span>Admin Console</span>
         </a>
       `;
+    } else if (role === 'service_provider') {
+      portalBackLink = `
+        <a href="#/service-portal" class="menu-item return-link return-link-provider">
+          <i class="fa-solid fa-handshake-angle"></i>
+          <span>Service Portal</span>
+        </a>
+      `;
     }
 
     sidebarMenu.innerHTML = `
@@ -735,6 +740,14 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
         <i class="fa-solid fa-user-doctor"></i>
         <span>Find Care</span>
       </a>
+      <a href="#/services" class="menu-item" id="nav-services">
+        <i class="fa-solid fa-handshake-angle"></i>
+        <span>Browse Services</span>
+      </a>
+      <a href="#/marketplace" class="menu-item" id="nav-marketplace">
+        <i class="fa-solid fa-store"></i>
+        <span>Pet Marketplace</span>
+      </a>
       <a href="#/community" class="menu-item" id="nav-community">
         <i class="fa-solid fa-users"></i>
         <span>Community Feed</span>
@@ -755,6 +768,5 @@ export async function updateSidebarForRole(portalContext, user, role = 'customer
     `;
   }
 
-  // Re-apply active highlighting after sidebar html is rendered/rebuilt
   Router.updateActiveNavLinks(window.location.hash || '#/dashboard');
 }

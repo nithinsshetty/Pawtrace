@@ -1,8 +1,8 @@
 // ==========================================================================
-// REMINDERS & TASK MANAGEMENT MODULE
+// REMINDERS & TASK MANAGEMENT MODULE (Supabase)
 // ==========================================================================
 
-import { db, fb } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
 import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML } from './utils.js';
 import { Router } from './router.js';
@@ -16,46 +16,40 @@ export async function renderReminders(params) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'Care Reminders';
 
-  if (!db) return;
-
   showLoading(true, "Fetching reminders log...");
   try {
-    const petDoc = await db.collection('pets').doc(petId).get();
-    if (!petDoc.exists) {
+    const { data: pet, error } = await supabase.from('pets').select('*').eq('id', petId).single();
+    if (error || !pet) {
       showToast("Pet profile not found.", "error");
       Router.navigate('/pets');
       return;
     }
 
-    const pet = petDoc.data();
-    pet.id = petDoc.id;
-
-    // Verify Ownership
     const user = getCurrentUser();
-    if (pet.ownerId !== user.uid) {
+    if (pet.owner_id !== user.uid) {
       showToast("Access Denied.", "error");
       Router.navigate('/pets');
       return;
     }
 
-    // Render page layout
+    const petForImage = { name: pet.name, petType: pet.species, profileImage: pet.photo_url };
+
     viewport.innerHTML = `
-      <!-- Pet Detail Header -->
       <div class="glass-card detail-header">
         <div class="detail-avatar">
-          ${getPetImageHTML(pet, 'small')}
+          ${getPetImageHTML(petForImage, 'small')}
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
             <span>${pet.name}</span>
-            <span class="pet-status-badge ${pet.lostStatus === 'LOST' ? 'lost' : 'safe'}">
-              ${pet.lostStatus || 'SAFE'}
+            <span class="pet-status-badge ${pet.is_lost ? 'lost' : 'safe'}">
+              ${pet.is_lost ? 'LOST' : 'SAFE'}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp; 
+            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
             <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
-            <i class="fa-solid fa-id-card"></i> ${pet.pawTraceId}
+            <i class="fa-solid fa-id-card"></i> ${pet.pawtrace_id}
           </p>
         </div>
         <div class="detail-actions">
@@ -65,7 +59,6 @@ export async function renderReminders(params) {
         </div>
       </div>
 
-      <!-- Navigation Tabs -->
       <div class="detail-tabs">
         <a href="#/pet/${pet.id}" class="tab-link" id="tab-profile">Profile Info</a>
         <a href="#/pet/${pet.id}/medical" class="tab-link" id="tab-medical">Medical Log</a>
@@ -73,10 +66,8 @@ export async function renderReminders(params) {
         <a href="#/pet/${pet.id}/journal" class="tab-link" id="tab-journal">Growth Journal</a>
       </div>
 
-      <!-- Reminders Content Workspace -->
       <div class="grid-cols-3">
-        
-        <!-- Active and completed lists -->
+
         <div class="glass-card" style="grid-column: span 2;">
           <div class="flex-between mb-2">
             <h3 style="font-weight:700;">Active Reminders</h3>
@@ -86,16 +77,13 @@ export async function renderReminders(params) {
           </div>
 
           <div id="active-reminders-list" style="display:flex; flex-direction:column;">
-            <!-- Render active reminders -->
           </div>
 
           <h3 style="font-weight:700; margin-top:2.5rem; margin-bottom:1rem; opacity:0.8;">Completed Reminders</h3>
           <div id="completed-reminders-list" style="display:flex; flex-direction:column; opacity:0.8;">
-            <!-- Render completed reminders -->
           </div>
         </div>
 
-        <!-- Sticky tip Widget -->
         <div>
           <div class="glass-card" style="position: sticky; top: 90px;">
             <h4 style="font-weight:700; color:var(--teal); margin-bottom:0.5rem;"><i class="fa-solid fa-circle-info"></i> Care Tip</h4>
@@ -108,10 +96,8 @@ export async function renderReminders(params) {
       </div>
     `;
 
-    // Bind Add reminder callback
     document.getElementById('btn-add-reminder').onclick = () => showAddReminderModal(petId);
 
-    // Initial Fetch of reminders list
     await loadRemindersList(petId);
 
   } catch (error) {
@@ -131,7 +117,7 @@ export async function renderReminders(params) {
 }
 
 /**
- * Fetch and render reminders matching subcollection
+ * Fetch and render reminders from Supabase
  */
 async function loadRemindersList(petId) {
   const activeContainer = document.getElementById('active-reminders-list');
@@ -142,14 +128,18 @@ async function loadRemindersList(petId) {
   completedContainer.innerHTML = '';
 
   try {
-    const snapshot = await db.collection('pets').doc(petId).collection('reminders')
-      .orderBy('dueDate', 'asc')
-      .get();
-      
+    const { data: reminders, error } = await supabase
+      .from('reminders')
+      .select('*')
+      .eq('pet_id', petId)
+      .order('reminder_date', { ascending: true });
+
+    if (error) throw error;
+
     activeContainer.innerHTML = '';
     completedContainer.innerHTML = '';
 
-    if (snapshot.empty) {
+    if (!reminders || reminders.length === 0) {
       activeContainer.innerHTML = `
         <div class="empty-state-mini">
           <i class="fa-solid fa-bell-slash"></i>
@@ -162,31 +152,27 @@ async function loadRemindersList(petId) {
     let hasActive = false;
     let hasCompleted = false;
 
-    snapshot.forEach((doc) => {
-      const item = doc.data();
-      item.id = doc.id;
-
-      // Evaluate due status
+    reminders.forEach((item) => {
+      const dueDateOnly = item.reminder_date ? item.reminder_date.split('T')[0] : '';
       const todayString = new Date().toISOString().split('T')[0];
-      const isOverdue = item.dueDate < todayString && !item.completed;
+      const isOverdue = dueDateOnly < todayString && !item.is_completed;
 
-      // Select icon according to reminder type
       let icon = 'fa-clock';
-      if (item.type === 'Vaccination') icon = 'fa-syringe';
-      if (item.type === 'Medicine') icon = 'fa-pills';
-      if (item.type === 'Vet Appointment') icon = 'fa-user-doctor';
+      if (item.reminder_type === 'Vaccination') icon = 'fa-syringe';
+      if (item.reminder_type === 'Medicine') icon = 'fa-pills';
+      if (item.reminder_type === 'Vet Appointment') icon = 'fa-user-doctor';
 
       const row = document.createElement('div');
-      row.className = `glass-card reminder-item ${item.completed ? 'completed' : ''}`;
+      row.className = `glass-card reminder-item ${item.is_completed ? 'completed' : ''}`;
       row.innerHTML = `
         <div class="reminder-left">
-          <div class="reminder-checkbox ${item.completed ? 'checked' : ''}" data-id="${item.id}" data-status="${item.completed}"></div>
+          <div class="reminder-checkbox ${item.is_completed ? 'checked' : ''}" data-id="${item.id}" data-status="${item.is_completed}"></div>
           <div class="reminder-info">
             <span class="reminder-title">${item.title}</span>
             <span class="reminder-meta">
-              <i class="fa-solid ${icon}" style="color:var(--teal); font-size:0.75rem;"></i> ${item.type} 
-              &nbsp;|&nbsp; Due Date: <strong>${formatFriendlyDate(item.dueDate)}</strong> 
-              ${item.dueTime ? `&bull; Time: <strong>${item.dueTime}</strong>` : ''}
+              <i class="fa-solid ${icon}" style="color:var(--teal); font-size:0.75rem;"></i> ${item.reminder_type}
+              &nbsp;|&nbsp; Due Date: <strong>${formatFriendlyDate(dueDateOnly)}</strong>
+              ${item.due_time ? `&bull; Time: <strong>${item.due_time}</strong>` : ''}
             </span>
           </div>
         </div>
@@ -198,7 +184,7 @@ async function loadRemindersList(petId) {
         </div>
       `;
 
-      if (item.completed) {
+      if (item.is_completed) {
         completedContainer.appendChild(row);
         hasCompleted = true;
       } else {
@@ -214,7 +200,6 @@ async function loadRemindersList(petId) {
       completedContainer.innerHTML = `<div class="empty-state-mini"><p>No archived completed reminders.</p></div>`;
     }
 
-    // Bind checkbox toggles
     document.querySelectorAll('.reminder-checkbox').forEach(box => {
       box.onclick = async () => {
         const id = box.getAttribute('data-id');
@@ -223,7 +208,6 @@ async function loadRemindersList(petId) {
       };
     });
 
-    // Bind Delete listeners
     document.querySelectorAll('.btn-delete-reminder').forEach(btn => {
       btn.onclick = () => {
         const id = btn.getAttribute('data-id');
@@ -242,10 +226,12 @@ async function loadRemindersList(petId) {
  */
 async function toggleReminderCompleted(petId, reminderId, completedStatus) {
   try {
-    await db.collection('pets').doc(petId).collection('reminders').doc(reminderId).update({
-      completed: completedStatus
-    });
-    
+    const { error } = await supabase
+      .from('reminders')
+      .update({ is_completed: completedStatus })
+      .eq('id', reminderId);
+    if (error) throw error;
+
     showToast(completedStatus ? "Reminder completed!" : "Reminder marked active.", "success");
     loadRemindersList(petId);
   } catch (error) {
@@ -303,14 +289,15 @@ function showAddReminderModal(petId) {
       const dueTime = document.getElementById('rem-time').value;
 
       try {
-        await db.collection('pets').doc(petId).collection('reminders').add({
-          type,
+        const { error } = await supabase.from('reminders').insert({
+          pet_id: petId,
+          reminder_type: type,
           title,
-          dueDate,
-          dueTime,
-          completed: false,
-          createdAt: fb.firestore.FieldValue.serverTimestamp()
+          reminder_date: dueDate,
+          due_time: dueTime || null,
+          is_completed: false
         });
+        if (error) throw error;
 
         showToast("Reminder created successfully.", "success");
         closeModal();
@@ -335,7 +322,8 @@ function confirmDeleteReminder(petId, reminderId) {
     confirmText: "Yes, Delete",
     onConfirm: async () => {
       try {
-        await db.collection('pets').doc(petId).collection('reminders').doc(reminderId).delete();
+        const { error } = await supabase.from('reminders').delete().eq('id', reminderId);
+        if (error) throw error;
         showToast("Reminder deleted.", "info");
         closeModal();
         loadRemindersList(petId);

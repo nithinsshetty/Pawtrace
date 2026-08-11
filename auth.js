@@ -1,27 +1,19 @@
 // ==========================================================================
-// PAWTRACE AUTHENTICATION MODULE (Firebase SDK Reversion)
+// PAWTRACE AUTHENTICATION MODULE (Supabase)
 // ==========================================================================
 
-import { auth, db } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { showToast, showLoading } from './utils.js';
 import { Router } from './router.js';
 
-// State management variables
 let currentUser = null;
 let authInitialized = false;
 const authListeners = new Set();
 
 const ADMIN_EMAILS = [
-  'admin@pawtrace.com',
-  'admin@example.com',
-  'nithin@pawtrace.com',
-  'nss@pawtrace.com',
-  'nithinsshetty3@gmail.com'
+  'nss@pt.com'
 ];
 
-/**
- * Register callback to trigger on user authentication state adjustments
- */
 export function subscribeToAuthChanges(callback) {
   authListeners.add(callback);
   if (authInitialized) {
@@ -44,32 +36,57 @@ export function getRouterAuthState() {
   };
 }
 
-/**
- * Initialise session persistence state listener using custom API
- */
+// TODO: vet/ngo/service_provider approval checks depended on Firestore fields
+// (vetDetails, ngoDetails, serviceProviders collection) that don't exist yet
+// in Supabase. Re-enable real checks once those tables are built.
+async function checkUserVerificationStatus(user, role) {
+  return { allowed: true };
+}
+
+async function loadProfile(supabaseUser) {
+  const { data: profile } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', supabaseUser.id)
+    .single();
+
+  const role = profile?.role || 'customer';
+
+  return {
+    uid: supabaseUser.id,
+    email: supabaseUser.email,
+    displayName: profile?.display_name || supabaseUser.email.split('@')[0],
+    role: role,
+    photoURL: profile?.photo_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(profile?.display_name || supabaseUser.id)}`
+  };
+}
+
 export function initAuth() {
-  // Listen for Firebase Auth state changes
-  auth.onAuthStateChanged(async (user) => {
-    if (user) {
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (session?.user) {
       try {
-        const userDoc = await db.collection('users').doc(user.uid).get();
-        const role = userDoc.exists ? (userDoc.data().role || 'owner') : 'owner';
-        currentUser = {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || user.email.split('@')[0],
-          role: role,
-          photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.displayName || user.uid)}`
-        };
-        console.log("Auth Session Initialized: Logged in as", currentUser.email, "with role", role);
+        currentUser = await loadProfile(session.user);
+
+        const check = await checkUserVerificationStatus(session.user, currentUser.role);
+        if (!check.allowed) {
+          await supabase.auth.signOut();
+          currentUser = null;
+          showToast(check.message, "error");
+          authInitialized = true;
+          notifyAuthChange();
+          Router.navigate('/login');
+          return;
+        }
+
+        console.log("Auth Session Initialized: Logged in as", currentUser.email, "with role", currentUser.role);
       } catch (err) {
-        console.error("Failed to load user role from Firestore:", err);
+        console.error("Failed to load user profile from Supabase:", err);
         currentUser = {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || user.email.split('@')[0],
-          role: 'owner',
-          photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.displayName || user.uid)}`
+          uid: session.user.id,
+          email: session.user.email,
+          displayName: session.user.email.split('@')[0],
+          role: 'customer',
+          photoURL: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(session.user.id)}`
         };
       }
     } else {
@@ -82,29 +99,25 @@ export function initAuth() {
   });
 }
 
-/**
- * Register a new user account and synchronize parameters in Firestore
- */
-export async function signUp(email, password, displayName, additionalData = { role: 'owner' }) {
+export async function signUp(email, password, displayName, additionalData = { role: 'customer' }) {
   showLoading(true, "Registering profile ecosystem...");
   try {
-    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-    const user = userCredential.user;
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: displayName,
+          role: additionalData.role
+        }
+      }
+    });
 
-    // Update display name
-    await user.updateProfile({ displayName });
-
-    // Store user data in Firestore users collection
-    const userData = {
-      uid: user.uid,
-      email: email.toLowerCase().trim(),
-      displayName,
-      role: additionalData.role
-    };
-    await db.collection('users').doc(user.uid).set(userData);
+    if (error) throw error;
+    const user = data.user;
 
     currentUser = {
-      uid: user.uid,
+      uid: user.id,
       email: user.email,
       displayName: displayName,
       role: additionalData.role,
@@ -123,26 +136,19 @@ export async function signUp(email, password, displayName, additionalData = { ro
   }
 }
 
-/**
- * Authenticate existing user session
- */
 export async function signIn(email, password) {
   showLoading(true, "Authenticating user...");
   try {
-    const userCredential = await auth.signInWithEmailAndPassword(email, password);
-    const user = userCredential.user;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
 
-    // Load role from Firestore users collection
-    const userDoc = await db.collection('users').doc(user.uid).get();
-    const role = userDoc.exists ? (userDoc.data().role || 'owner') : 'owner';
+    currentUser = await loadProfile(data.user);
 
-    currentUser = {
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName || user.email.split('@')[0],
-      role: role,
-      photoURL: user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.displayName || user.uid)}`
-    };
+    const check = await checkUserVerificationStatus(data.user, currentUser.role);
+    if (!check.allowed) {
+      await supabase.auth.signOut();
+      throw new Error(check.message);
+    }
 
     showToast("Logged in successfully!", "success");
     notifyAuthChange();
@@ -157,13 +163,10 @@ export async function signIn(email, password) {
   }
 }
 
-/**
- * Sign out current session
- */
 export async function signOut() {
   showLoading(true, "Signing out...");
   try {
-    await auth.signOut();
+    await supabase.auth.signOut();
     currentUser = null;
     showToast("Signed out successfully.", "info");
     notifyAuthChange();
@@ -176,25 +179,24 @@ export async function signOut() {
   }
 }
 
-/**
- * Update user display profile settings
- */
 export async function updateUserProfile(displayName) {
   showLoading(true, "Updating profile details...");
   try {
-    const user = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("No authenticated user.");
 
-    await user.updateProfile({ displayName });
+    const { error } = await supabase
+      .from('users')
+      .update({ display_name: displayName })
+      .eq('id', user.id);
 
-    // Update in Firestore users collection
-    await db.collection('users').doc(user.uid).update({ displayName });
+    if (error) throw error;
 
     if (currentUser) {
       currentUser.displayName = displayName;
       currentUser.photoURL = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(displayName)}`;
     }
-    
+
     notifyAuthChange();
     showToast("Profile settings updated successfully.", "success");
   } catch (error) {
@@ -205,4 +207,5 @@ export async function updateUserProfile(displayName) {
     showLoading(false);
   }
 }
+
 export { ADMIN_EMAILS };

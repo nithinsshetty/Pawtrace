@@ -1,13 +1,94 @@
 // ==========================================================================
-// PET MANAGEMENT MODULE (CRUD, Profile Details, QR Tag generator, Shared Panels)
+// PET MANAGEMENT MODULE (Supabase)
 // ==========================================================================
 
-import { db, storage, fb } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, calculateAge, getPetImageHTML, getPetPlaceholder, generatePawTraceId } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, calculateAge, getPetImageHTML, getPetPlaceholder, generatePawTraceId, uploadToStorage } from './utils.js';
 import { Router } from './router.js';
 import { renderCaregiverManager } from './caregiver.js';
 import { showOrderModal } from './orders.js';
+
+/**
+ * Checks if all mandatory fields are filled. Operates on the JS-shaped pet
+ * object (camelCase) used throughout this file's UI layer.
+ */
+export function isProfileComplete(pet) {
+  if (!pet) return false;
+  const requiredFields = [
+    'name', 'petType', 'breed', 'gender', 'age', 'weight',
+    'ownerName', 'ownerPhone', 'emergencyContactName', 'emergencyContact'
+  ];
+  for (const field of requiredFields) {
+    if (pet[field] === undefined || pet[field] === null || String(pet[field]).trim() === '') {
+      return false;
+    }
+  }
+  if (!pet.recoveryContact || String(pet.recoveryContact).trim() === '') return false;
+  if (pet.petType === 'Dog' && !pet.size) return false;
+  if ((pet.petType === 'Dog' || pet.petType === 'Cat') && !pet.neutered) return false;
+  if (pet.petType === 'Cat' && !pet.indoorOutdoor) return false;
+  return true;
+}
+
+/**
+ * Maps a Supabase pets row (snake_case) into the JS shape (camelCase)
+ * used across the pet UI/wizard code.
+ */
+function mapPetRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    petType: row.species,
+    breed: row.breed,
+    gender: row.gender,
+    dob: row.date_of_birth,
+    age: row.date_of_birth ? calculateAge(row.date_of_birth) : '',
+    weight: row.weight,
+    profileImage: row.photo_url,
+    size: row.size,
+    indoorOutdoor: row.indoor_outdoor,
+    neutered: row.neutered,
+    microchipId: row.microchip_id,
+    adoptionSource: row.adoption_source,
+    registrationDate: row.registration_date,
+    adoptionDate: row.adoption_date,
+    ownerName: row.owner_name,
+    ownerPhone: row.owner_phone,
+    emergencyContactName: row.emergency_contact_name,
+    emergencyContact: row.emergency_contact,
+    relationship: row.relationship,
+    address: row.address,
+    city: row.city,
+    state: row.state,
+    postalCode: row.postal_code,
+    bloodType: row.blood_type,
+    insurance: row.insurance,
+    vaccinationStatus: row.vaccination_status,
+    allergies: row.allergies,
+    conditions: row.conditions,
+    medications: row.medications,
+    medicalNotes: row.medical_notes,
+    dietType: row.diet_type,
+    feedingSchedule: row.feeding_schedule,
+    activityLevel: row.activity_level,
+    treats: row.treats,
+    behaviorNotes: row.behavior_notes,
+    trainingDetails: row.training_details,
+    additionalPhotos: row.additional_photos || [],
+    recoveryContact: row.recovery_contact,
+    recoveryInstructions: row.recovery_instructions,
+    rewardAmount: row.reward_amount,
+    privacy: row.privacy || {},
+    ownerId: row.owner_id,
+    ownerContact: row.owner_contact,
+    isDraft: row.is_draft,
+    pawTraceId: row.pawtrace_id,
+    lostStatus: row.is_lost ? 'LOST' : 'SAFE',
+    hasTag: row.has_tag,
+    tagOrderId: row.tag_order_id
+  };
+}
 
 /**
  * Renders the main pets list page
@@ -31,40 +112,34 @@ export async function renderPets() {
     </div>
 
     <div id="pets-list-container" class="pets-grid">
-      <!-- Loading Skeletons -->
       <div class="skeleton skeleton-card"></div>
       <div class="skeleton skeleton-card"></div>
     </div>
   `;
 
-  // Bind Add Pet Wizard route
   document.getElementById('btn-add-pet').onclick = () => Router.navigate('/pet/register');
 
-  // Load pets
   await loadUserPetsList(user.uid);
 }
 
 /**
- * Fetch pets matching user uid from Firestore
+ * Fetch pets matching user uid from Supabase
  */
 async function loadUserPetsList(uid) {
   const container = document.getElementById('pets-list-container');
-  if (!db) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <i class="fa-solid fa-database"></i>
-        <p>Database config missing. Please set your credentials.</p>
-      </div>
-    `;
-    return;
-  }
 
   showLoading(true, "Fetching pet profiles...");
   try {
-    const snapshot = await db.collection('pets').where('ownerId', '==', uid).get();
+    const { data: rows, error } = await supabase
+      .from('pets')
+      .select('*')
+      .eq('owner_id', uid);
+
+    if (error) throw error;
+
     container.innerHTML = '';
 
-    if (snapshot.empty) {
+    if (!rows || rows.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
           <i class="fa-solid fa-paw" style="font-size:3rem; color:var(--teal); opacity:0.6;"></i>
@@ -75,13 +150,23 @@ async function loadUserPetsList(uid) {
       return;
     }
 
-    snapshot.forEach((doc) => {
-      const pet = doc.data();
-      pet.id = doc.id;
+    rows.forEach((row) => {
+      const pet = mapPetRow(row);
 
       const isDraft = pet.isDraft === true;
-      const badgeClass = isDraft ? 'draft' : (pet.lostStatus === 'LOST' ? 'lost' : 'safe');
-      const badgeText = isDraft ? 'DRAFT' : (pet.lostStatus || 'SAFE');
+      let badgeClass = 'safe';
+      let badgeText = pet.lostStatus || 'SAFE';
+
+      if (isDraft) {
+        badgeClass = 'draft';
+        badgeText = 'DRAFT';
+      } else if (pet.lostStatus === 'LOST') {
+        badgeClass = 'lost';
+        badgeText = 'MISSING';
+      } else if (!isProfileComplete(pet)) {
+        badgeClass = 'warning';
+        badgeText = 'INCOMPLETE';
+      }
       const actionLink = isDraft ? `#/pet/${pet.id}/edit` : `#/pet/${pet.id}`;
       const actionText = isDraft ? '<i class="fa-solid fa-pen-to-square"></i> Edit Draft' : '<i class="fa-solid fa-folder-open"></i> View Records';
 
@@ -104,20 +189,24 @@ async function loadUserPetsList(uid) {
             <span>•</span>
             <span><i class="fa-solid fa-venus-mars"></i> ${pet.gender || 'N/A'}</span>
           </div>
-          <div class="pet-card-actions">
-            <a href="${actionLink}" class="btn btn-secondary btn-full" style="font-size:0.8rem; padding: 0.5rem 1rem;">
+          <div class="pet-card-actions" style="flex-wrap: wrap; gap: 0.5rem 0;">
+            <a href="${actionLink}" class="btn btn-secondary" style="font-size:0.8rem; padding: 0.5rem 1rem; flex: 1;">
               ${actionText}
             </a>
             <button class="btn btn-danger btn-delete-pet" data-id="${pet.id}" data-name="${pet.name}" style="padding: 0.5rem;">
               <i class="fa-solid fa-trash"></i>
             </button>
+            ${!isDraft ? `
+              <a href="#/marketplace/new/${pet.id}" class="btn btn-outline btn-full" style="font-size:0.75rem; padding: 0.40rem; border:1px solid var(--terracotta); color:var(--terracotta); width: 100%; text-align: center;">
+                <i class="fa-solid fa-store"></i> List on Marketplace
+              </a>
+            ` : ''}
           </div>
         </div>
       `;
       container.appendChild(card);
     });
 
-    // Bind Delete Handlers
     container.querySelectorAll('.btn-delete-pet').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
@@ -136,176 +225,6 @@ async function loadUserPetsList(uid) {
 }
 
 /**
- * Dialog Form to Add/Edit Pet
- */
-function showAddPetModal(existingPet = null) {
-  const isEdit = !!existingPet;
-  showModal({
-    title: isEdit ? `Edit Profile: ${existingPet.name}` : "Register New Companion",
-    bodyHtml: `
-      <form id="pet-form" style="display:flex; flex-direction:column; gap:1rem;">
-        <div class="form-row">
-          <div class="form-group">
-            <label for="pet-name">Pet Name *</label>
-            <input type="text" id="pet-name" class="form-control" value="${isEdit ? existingPet.name : ''}" required placeholder="E.g. Rex">
-          </div>
-          <div class="form-group">
-            <label for="pet-breed">Breed *</label>
-            <input type="text" id="pet-breed" class="form-control" value="${isEdit ? existingPet.breed : ''}" required placeholder="E.g. Golden Retriever">
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="pet-dob">Date of Birth</label>
-            <input type="date" id="pet-dob" class="form-control" value="${isEdit ? existingPet.dob || '' : ''}">
-          </div>
-          <div class="form-group">
-            <label for="pet-gender">Gender</label>
-            <select id="pet-gender" class="form-control">
-              <option value="Male" ${isEdit && existingPet.gender === 'Male' ? 'selected' : ''}>Male</option>
-              <option value="Female" ${isEdit && existingPet.gender === 'Female' ? 'selected' : ''}>Female</option>
-              <option value="Unknown" ${isEdit && existingPet.gender === 'Unknown' ? 'selected' : ''}>Unknown/Other</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="pet-weight">Weight (kg) *</label>
-            <input type="number" step="0.1" id="pet-weight" class="form-control" value="${isEdit ? existingPet.weight || '' : ''}" required placeholder="E.g. 12.5">
-          </div>
-          <div class="form-group">
-            <label for="pet-privacy">Privacy Settings</label>
-            <select id="pet-privacy" class="form-control">
-              <option value="public" ${isEdit && existingPet.privacySettings === 'public' ? 'selected' : ''}>Public Recovery (Contact Info Visible)</option>
-              <option value="private" ${isEdit && existingPet.privacySettings === 'private' ? 'selected' : ''}>Private (Hide details until lost)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="pet-emergency">Emergency Contact Phone *</label>
-            <input type="tel" id="pet-emergency" class="form-control" value="${isEdit ? existingPet.emergencyContact || '' : ''}" required placeholder="+1 (555) 123-4567">
-          </div>
-          <div class="form-group">
-            <label for="pet-vacc">Vaccination Status</label>
-            <select id="pet-vacc" class="form-control">
-              <option value="Up-to-date" ${isEdit && existingPet.vaccinationStatus === 'Up-to-date' ? 'selected' : ''}>Up to Date</option>
-              <option value="Incomplete" ${isEdit && existingPet.vaccinationStatus === 'Incomplete' ? 'selected' : ''}>Incomplete/Pending</option>
-              <option value="Unknown" ${isEdit && existingPet.vaccinationStatus === 'Unknown' ? 'selected' : ''}>Unknown</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="pet-image">Profile Photo</label>
-          <input type="file" id="pet-image" class="form-control" accept="image/*">
-          <small style="color:var(--text-muted); font-size:0.75rem;">Max file size 3MB. Formats: JPG, PNG, WEBP.</small>
-        </div>
-
-        <div class="form-group">
-          <label for="pet-notes">Critical Medical Notes</label>
-          <textarea id="pet-notes" class="form-control" rows="3" placeholder="Allergies, chronic diseases, or medication schedule details...">${isEdit ? existingPet.medicalNotes || '' : ''}</textarea>
-        </div>
-      </form>
-    `,
-    confirmText: isEdit ? "Save Updates" : "Create Profile",
-    onConfirm: async () => {
-      const form = document.getElementById('pet-form');
-      if (!form.checkValidity()) {
-        form.reportValidity();
-        return true;
-      }
-
-      const name = document.getElementById('pet-name').value.trim();
-      const breed = document.getElementById('pet-breed').value.trim();
-      const dob = document.getElementById('pet-dob').value;
-      const gender = document.getElementById('pet-gender').value;
-      const weight = parseFloat(document.getElementById('pet-weight').value);
-      const privacy = document.getElementById('pet-privacy').value;
-      const emergency = document.getElementById('pet-emergency').value.trim();
-      const vacc = document.getElementById('pet-vacc').value;
-      const notes = document.getElementById('pet-notes').value.trim();
-      const imageFileInput = document.getElementById('pet-image');
-
-      const user = getCurrentUser();
-      if (!user) return false;
-
-      let profileImageUrl = isEdit ? existingPet.profileImage : '';
-      if (imageFileInput.files.length > 0) {
-        const file = imageFileInput.files[0];
-        const error = validateFile(file, FILE_LIMITS.IMAGE_TYPES, FILE_LIMITS.IMAGE_MAX_SIZE);
-        if (error) {
-          showToast(error, "warning");
-          return true;
-        }
-
-        try {
-          if (storage) {
-            const petIdPlaceholder = isEdit ? existingPet.id : `temp-${Date.now()}`;
-            const ref = storage.ref(`pets/${petIdPlaceholder}/profile_${Date.now()}`);
-            const snapshot = await ref.put(file);
-            profileImageUrl = await snapshot.ref.getDownloadURL();
-          } else {
-            profileImageUrl = await readFileAsDataURL(file);
-          }
-        } catch (storageError) {
-          profileImageUrl = await readFileAsDataURL(file);
-        }
-      }
-
-      const age = calculateAge(dob);
-      const petData = {
-        name,
-        breed,
-        dob,
-        age,
-        gender,
-        weight,
-        privacySettings: privacy,
-        emergencyContact: emergency,
-        vaccinationStatus: vacc,
-        medicalNotes: notes,
-        profileImage: profileImageUrl,
-        ownerId: user.uid,
-        ownerContact: user.email,
-        lastUpdated: fb.firestore.FieldValue.serverTimestamp()
-      };
-
-      try {
-        if (isEdit) {
-          await db.collection('pets').doc(existingPet.id).update(petData);
-          showToast(`Successfully updated profile for ${name}`, "success");
-        } else {
-          const traceId = await generatePawTraceId();
-          petData.pawTraceId = traceId;
-          petData.lostStatus = 'SAFE';
-          petData.createdAt = fb.firestore.FieldValue.serverTimestamp();
-          petData.sharedWithVets = [];
-          
-          await db.collection('pets').add(petData);
-          showToast(`Successfully registered ${name}!`, "success");
-        }
-
-        closeModal();
-        if (isEdit) {
-          renderPetDetail({ id: existingPet.id });
-        } else {
-          renderPets();
-        }
-        return false;
-      } catch (err) {
-        console.error("Save Pet Error:", err);
-        showToast("Error updating pet profile.", "error");
-        return true;
-      }
-    }
-  });
-}
-
-/**
  * Confirm delete validation check
  */
 function confirmDeletePet(id, name) {
@@ -321,7 +240,8 @@ function confirmDeletePet(id, name) {
     confirmText: "Yes, Delete Profile",
     onConfirm: async () => {
       try {
-        await db.collection('pets').doc(id).delete();
+        const { error } = await supabase.from('pets').delete().eq('id', id);
+        if (error) throw error;
         showToast(`Profile for ${name} deleted.`, "info");
         renderPets();
         return false;
@@ -342,24 +262,17 @@ export async function renderPetDetail(params) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'Companion Profile';
 
-  if (!db) {
-    viewport.innerHTML = `<div class="empty-state"><p>Database offline.</p></div>`;
-    return;
-  }
-
   showLoading(true, "Fetching detailed records...");
   try {
-    const doc = await db.collection('pets').doc(petId).get();
-    if (!doc.exists) {
+    const { data: row, error } = await supabase.from('pets').select('*').eq('id', petId).single();
+    if (error || !row) {
       showToast("Pet profile not found.", "error");
       Router.navigate('/pets');
       return;
     }
 
-    const pet = doc.data();
-    pet.id = doc.id;
+    const pet = mapPetRow(row);
 
-    // Verify Ownership
     const user = getCurrentUser();
     if (pet.ownerId !== user.uid) {
       showToast("Access Denied: Not owner.", "error");
@@ -367,7 +280,6 @@ export async function renderPetDetail(params) {
       return;
     }
 
-    // Compute mock AI Wellness Index (SaaS Ring Animation)
     let aiWellnessScore = 95;
     if (pet.vaccinationStatus === 'Incomplete') aiWellnessScore -= 20;
     if (pet.medicalNotes && pet.medicalNotes.length > 50) aiWellnessScore -= 10;
@@ -381,8 +293,8 @@ export async function renderPetDetail(params) {
       return `
         <div class="flex-between" style="font-size:0.8rem; padding: 0.25rem 0; border-bottom: 1px dashed rgba(0,0,0,0.05);">
           <span style="color:var(--text-muted); font-weight:500;">${label}</span>
-          ${visible 
-            ? `<span style="background: rgba(82, 183, 136, 0.08); color: var(--accent-green); padding: 0.15rem 0.4rem; border-radius: var(--radius-sm); font-size:0.7rem; font-weight:700; display:inline-flex; align-items:center; gap:0.25rem;"><i class="fa-solid fa-eye" style="font-size:0.6rem;"></i> Public</span>` 
+          ${visible
+            ? `<span style="background: rgba(82, 183, 136, 0.08); color: var(--accent-green); padding: 0.15rem 0.4rem; border-radius: var(--radius-sm); font-size:0.7rem; font-weight:700; display:inline-flex; align-items:center; gap:0.25rem;"><i class="fa-solid fa-eye" style="font-size:0.6rem;"></i> Public</span>`
             : `<span style="background: rgba(230, 57, 70, 0.08); color: var(--accent-red); padding: 0.15rem 0.4rem; border-radius: var(--radius-sm); font-size:0.7rem; font-weight:700; display:inline-flex; align-items:center; gap:0.25rem;"><i class="fa-solid fa-eye-slash" style="font-size:0.6rem;"></i> Private</span>`
           }
         </div>
@@ -390,7 +302,6 @@ export async function renderPetDetail(params) {
     };
 
     viewport.innerHTML = `
-      <!-- Pet Detail Header Card -->
       <div class="glass-card detail-header magnetic-card" style="background: linear-gradient(135deg, rgba(31, 122, 140, 0.03) 0%, rgba(219, 93, 57, 0.03) 100%); margin-bottom: 2rem;">
         <div class="detail-avatar">
           ${getPetImageHTML(pet, 'small')}
@@ -398,12 +309,12 @@ export async function renderPetDetail(params) {
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
             <span>${pet.name}</span>
-            <span class="pet-status-badge ${pet.lostStatus === 'LOST' ? 'lost' : 'safe'}" id="detail-status-badge">
-              ${pet.lostStatus || 'SAFE'}
+            <span class="pet-status-badge ${pet.lostStatus === 'LOST' ? 'lost' : !isProfileComplete(pet) ? 'warning' : 'safe'}" id="detail-status-badge">
+              ${pet.lostStatus || (!isProfileComplete(pet) ? 'INCOMPLETE' : 'SAFE')}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp; 
+            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
             <i class="fa-solid fa-venus-mars"></i> ${pet.gender} &nbsp;|&nbsp;
             <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
             <i class="fa-solid fa-id-card"></i> ${pet.pawTraceId}
@@ -420,7 +331,6 @@ export async function renderPetDetail(params) {
         </div>
       </div>
 
-      <!-- Detail Sub-Navigation Tabs -->
       <div class="detail-tabs" style="margin-bottom: 1.5rem;">
         <a href="#/pet/${pet.id}" class="tab-link active" id="tab-profile">Profile Info</a>
         <a href="#/pet/${pet.id}/medical" class="tab-link" id="tab-medical">Medical Log</a>
@@ -428,13 +338,10 @@ export async function renderPetDetail(params) {
         <a href="#/pet/${pet.id}/journal" class="tab-link" id="tab-journal">Growth Journal</a>
       </div>
 
-      <!-- Content Grid: 6 cards organized cleanly -->
       <div class="grid-split-2-1" style="align-items: start; margin-top:0; gap: 1.5rem;">
-        
-        <!-- Left Side Cards: Identity, Owner, Medical, Lifestyle -->
+
         <div style="display:flex; flex-direction:column; gap:1.5rem;">
-          
-          <!-- Card 1: Identity -->
+
           <div class="glass-card" style="padding:1.5rem;">
             <div style="display:flex; align-items:center; gap:0.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom:1.25rem;">
               <i class="fa-solid fa-id-card" style="color:var(--teal); font-size:1.3rem;"></i>
@@ -459,14 +366,13 @@ export async function renderPetDetail(params) {
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">CALCULATED AGE</span>
-                <strong>${pet.age || 'N/A'}</strong>
+                <strong>${calculateAge(pet.dob) || pet.age || 'N/A'}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">WEIGHT</span>
                 <strong>${pet.weight ? pet.weight + ' kg' : 'N/A'}</strong>
               </div>
-              
-              <!-- Species specific fields -->
+
               ${pet.size ? `
                 <div>
                   <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">SIZE</span>
@@ -485,7 +391,7 @@ export async function renderPetDetail(params) {
                   <strong>${pet.neutered}</strong>
                 </div>
               ` : ''}
-              
+
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">MICROCHIP ID</span>
                 <strong>${pet.microchipId || 'None'}</strong>
@@ -508,7 +414,6 @@ export async function renderPetDetail(params) {
               ` : ''}
             </div>
 
-            <!-- Additional Photos Gallery -->
             ${pet.additionalPhotos && pet.additionalPhotos.length > 0 ? `
               <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-glass); padding-top: 1.25rem;">
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase; margin-bottom:0.75rem;">Photos Gallery</span>
@@ -523,7 +428,6 @@ export async function renderPetDetail(params) {
             ` : ''}
           </div>
 
-          <!-- Card 2: Owner Details -->
           <div class="glass-card" style="padding:1.5rem;">
             <div style="display:flex; align-items:center; gap:0.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom:1.25rem;">
               <i class="fa-solid fa-user-shield" style="color:var(--teal); font-size:1.3rem;"></i>
@@ -563,7 +467,6 @@ export async function renderPetDetail(params) {
             ` : ''}
           </div>
 
-          <!-- Card 3: Medical -->
           <div class="glass-card" style="padding:1.5rem;">
             <div style="display:flex; align-items:center; gap:0.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom:1.25rem;">
               <i class="fa-solid fa-heart-pulse" style="color:var(--teal); font-size:1.3rem;"></i>
@@ -603,7 +506,6 @@ export async function renderPetDetail(params) {
             ` : ''}
           </div>
 
-          <!-- Card 4: Lifestyle -->
           <div class="glass-card" style="padding:1.5rem;">
             <div style="display:flex; align-items:center; gap:0.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom:1.25rem;">
               <i class="fa-solid fa-paw" style="color:var(--teal); font-size:1.3rem;"></i>
@@ -641,57 +543,50 @@ export async function renderPetDetail(params) {
             ` : ''}
           </div>
 
-          <!-- Caregiver Manager Section -->
           <div id="caregiver-manager-section"></div>
-
-          <!-- Vet Shared Access Section -->
           <div id="vet-sharing-section"></div>
 
         </div>
 
-        <!-- Right Side Sidebar Cards: Recovery, Privacy, QR Tag, AI Score -->
         <div style="display:flex; flex-direction:column; gap:1.5rem;">
-          
-          <!-- Card 5: Recovery Info -->
+
           <div class="glass-card" style="padding:1.5rem; border-left:4px solid ${pet.lostStatus === 'LOST' ? 'var(--accent-red)' : 'var(--teal)'};">
             <div style="display:flex; align-items:center; gap:0.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom:1.25rem;">
               <i class="fa-solid fa-house-chimney-medical" style="color:${pet.lostStatus === 'LOST' ? 'var(--accent-red)' : 'var(--teal)'}; font-size:1.3rem;"></i>
               <h3 style="font-weight:700; font-family:'Outfit'; margin:0;">Recovery</h3>
             </div>
-            
+
             <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1.25rem;">
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">RECOVERY CONTACT PHONE</span>
                 <strong>${pet.recoveryContact || pet.ownerPhone || pet.emergencyContact || 'N/A'}</strong>
               </div>
-              
+
               ${pet.rewardAmount ? `
                 <div style="background:rgba(244, 208, 104, 0.15); padding:0.5rem 0.75rem; border-radius:var(--radius-sm); border:1px solid var(--accent-yellow);">
                   <span style="font-size:0.7rem; color:#856404; display:block; font-weight:600; text-transform:uppercase;">REWARD OFFERED</span>
                   <strong style="color:#856404; font-size:1rem;">${pet.rewardAmount}</strong>
                 </div>
               ` : ''}
-              
+
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">FINDER SCAN INSTRUCTIONS</span>
                 <p style="font-size:0.8rem; line-height:1.4; margin-top:0.2rem;">${pet.recoveryInstructions || "Please keep safe and contact immediately. Pet is friendly but may be scared."}</p>
               </div>
             </div>
 
-            <!-- Lost Status Action Button -->
             <button id="btn-toggle-lost-card" class="btn ${pet.lostStatus === 'LOST' ? 'btn-secondary' : 'btn-danger'} btn-full" style="font-size:0.85rem; padding:0.6rem;">
               <i class="fa-solid ${pet.lostStatus === 'LOST' ? 'fa-shield-halved' : 'fa-triangle-exclamation'}"></i>
               <span>${pet.lostStatus === 'LOST' ? 'Mark Found & Safe' : 'Report Lost / Missing'}</span>
             </button>
           </div>
 
-          <!-- Card 6: Privacy Settings -->
           <div class="glass-card" style="padding:1.5rem;">
             <div style="display:flex; align-items:center; gap:0.5rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom:1.25rem;">
               <i class="fa-solid fa-user-lock" style="color:var(--teal); font-size:1.3rem;"></i>
               <h3 style="font-weight:700; font-family:'Outfit'; margin:0;">Privacy</h3>
             </div>
-            
+
             <div style="display:flex; flex-direction:column; gap:0.65rem;">
               ${renderPrivacyIndicator('Owner Name', pet.privacy?.ownerName)}
               ${renderPrivacyIndicator('Phone Number', pet.privacy?.phoneNumber)}
@@ -704,7 +599,6 @@ export async function renderPetDetail(params) {
             </div>
           </div>
 
-          <!-- AI Score Ring Card -->
           <div class="glass-card text-center magnetic-card" style="padding:1.5rem 1rem;">
             <h3 style="font-weight:800; font-family:'Outfit'; font-size:1.1rem; margin-bottom:1rem; color:var(--teal);">
               AI Wellness Score
@@ -724,7 +618,6 @@ export async function renderPetDetail(params) {
             </p>
           </div>
 
-          <!-- QR Code Tag Card -->
           ${pet.hasTag ? `
             <div class="glass-card qr-container magnetic-card" style="padding:1.5rem; text-align:center;">
               <h3 style="font-weight:700; font-family:'Outfit'; margin-bottom:0.25rem;">Recovery QR Code</h3>
@@ -738,7 +631,7 @@ export async function renderPetDetail(params) {
             <div class="glass-card qr-container magnetic-card text-center" style="position:relative; overflow:hidden; padding:1.5rem;">
               <h3 style="font-weight:700; font-family:'Outfit'; margin-bottom:0.25rem;">Recovery QR Code</h3>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom:1.25rem;">Secure digital identity badge tag</p>
-              
+
               <div class="locked-qr-placeholder" style="margin: 0 auto 1.5rem; width:140px; height:140px; position:relative; border-radius:var(--radius-sm); border: 1px dashed var(--border-glass); background:rgba(0,0,0,0.02); display:flex; align-items:center; justify-content:center;">
                 <div class="blurred-qr-grid" style="position:absolute; inset:0; opacity:0.1; background-image: radial-gradient(var(--text-main) 2px, transparent 2.5px); background-size: 10px 10px; filter: blur(1.5px);"></div>
                 <div style="z-index:2; text-align:center;">
@@ -746,7 +639,7 @@ export async function renderPetDetail(params) {
                   <span style="font-size:0.65rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">QR Locked</span>
                 </div>
               </div>
-              
+
               ${pet.tagOrderId ? `
                 <a href="#/orders" class="btn btn-outline btn-full" style="font-size:0.85rem;">
                   <i class="fa-solid fa-truck-fast"></i> Track Pendant Order
@@ -764,29 +657,25 @@ export async function renderPetDetail(params) {
       </div>
     `;
 
-    // Dynamic bindings
     document.getElementById('btn-edit-pet').onclick = () => Router.navigate(`/pet/${pet.id}/edit`);
-    
+
     const toggleHeaderBtn = document.getElementById('btn-toggle-lost-header');
     if (toggleHeaderBtn) toggleHeaderBtn.onclick = () => togglePetLostStatus(pet);
-    
+
     const toggleCardBtn = document.getElementById('btn-toggle-lost-card');
     if (toggleCardBtn) toggleCardBtn.onclick = () => togglePetLostStatus(pet);
-    
-    // Generate QR Tag Code if Tag is active
+
     if (pet.hasTag) {
       generateQrTagCode(pet.id);
     } else if (!pet.tagOrderId) {
       document.getElementById('btn-order-tag').onclick = () => showOrderModal(pet.id, pet.name);
     }
 
-    // Render Caregiver management controls
     const cgContainer = document.getElementById('caregiver-manager-section');
     if (cgContainer) {
       renderCaregiverManager(pet.id, cgContainer);
     }
 
-    // Render Vet access controls
     const vetContainer = document.getElementById('vet-sharing-section');
     if (vetContainer) {
       renderVetSharingPanel(pet, vetContainer);
@@ -863,21 +752,21 @@ async function togglePetLostStatus(pet) {
 
   showLoading(true, "Updating lost status...");
   try {
-    await db.collection('pets').doc(pet.id).update({
-      lostStatus: targetStatus,
-      lastUpdated: fb.firestore.FieldValue.serverTimestamp()
-    });
+    const { error } = await supabase
+      .from('pets')
+      .update({ is_lost: targetStatus === 'LOST', updated_at: new Date().toISOString() })
+      .eq('id', pet.id);
+    if (error) throw error;
 
-    const notificationMessage = targetStatus === 'LOST' 
+    const notificationMessage = targetStatus === 'LOST'
       ? `Alert: ${pet.name} has been marked as MISSING. Watch for scans.`
       : `Success: ${pet.name} has been marked as FOUND and safe.`;
 
-    await db.collection('users').doc(pet.ownerId).collection('notifications').add({
+    await supabase.from('notifications').insert({
+      user_id: pet.ownerId,
       type: 'STATUS_CHANGE',
-      petId: pet.id,
       message: notificationMessage,
-      timestamp: fb.firestore.FieldValue.serverTimestamp(),
-      read: false
+      is_read: false
     });
 
     showToast(`Pet marked as ${targetStatus === 'LOST' ? 'Missing' : 'Found'}`, targetStatus === 'LOST' ? 'warning' : 'success');
@@ -898,7 +787,7 @@ async function renderVetSharingPanel(pet, container) {
     <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem;">
       Provide verified veterinarians with permission to view your pet's medical histories and file reports/prescriptions.
     </p>
-    
+
     <div class="grid-split">
       <div>
         <h4 style="font-weight:600; font-size:0.9rem; margin-bottom:0.5rem;">Authorized Veterinarians</h4>
@@ -918,10 +807,8 @@ async function renderVetSharingPanel(pet, container) {
     </div>
   `;
 
-  // Fetch authorized vets
   await loadAuthorizedVetsList(pet, document.getElementById('authorized-vets-list'));
 
-  // Bind share form submission
   const shareForm = document.getElementById('vet-share-email-form');
   if (shareForm) {
     shareForm.onsubmit = async (e) => {
@@ -933,63 +820,55 @@ async function renderVetSharingPanel(pet, container) {
 }
 
 /**
- * Validates a vet's email, creates a vetAccess document, and updates pet permissions
+ * Validates a vet's email, creates a vet_access row.
+ * Vets are just users with role='vet' in public.users — no separate vetProfiles table needed.
  */
 async function requestVetAccess(pet, email) {
   showLoading(true, "Authorizing veterinarian...");
   try {
-    // 1. Search vetProfiles by email (case-insensitive conversion)
     const emailLower = email.toLowerCase().trim();
-    const snapshot = await db.collection('vetProfiles').where('email', '==', emailLower).get();
-    if (snapshot.empty) {
+    const { data: vet, error: vetErr } = await supabase
+      .from('users')
+      .select('id, display_name, email, vet_details')
+      .eq('email', emailLower)
+      .eq('role', 'vet')
+      .maybeSingle();
+
+    if (vetErr) throw vetErr;
+    if (!vet) {
       showToast("No registered veterinarian clinic found with that email address.", "warning");
       return;
     }
 
-    const vetDoc = snapshot.docs[0];
-    const vet = vetDoc.data();
-    const vetUid = vetDoc.id;
+    const { data: existing } = await supabase
+      .from('vet_access')
+      .select('id')
+      .eq('pet_id', pet.id)
+      .eq('vet_id', vet.id)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    // 2. Check if already shared
-    const currentList = pet.sharedWithVets || [];
-    if (currentList.includes(vetUid)) {
+    if (existing) {
       showToast("Access is already shared with this clinic.", "info");
       return;
     }
 
-    const resolvedPetName = pet.name || pet.petName || "Unnamed Pet";
-
-    // 3. Create vetAccess document
-    await db.collection('vetAccess').add({
-      petId: pet.id,
-      petName: resolvedPetName,
-      ownerId: pet.ownerId,
-      ownerName: pet.ownerName || "Pet Owner",
-      vetId: vetUid,
-      vetName: vet.name || "Vet Doctor",
-      vetEmail: vet.email || emailLower,
-      vetClinic: vet.clinic || "Clinic",
-      active: true,
-      status: 'active',
-      createdAt: fb.firestore.FieldValue.serverTimestamp()
+    const { error: insertErr } = await supabase.from('vet_access').insert({
+      pet_id: pet.id,
+      owner_id: pet.ownerId,
+      vet_id: vet.id,
+      status: 'active'
     });
+    if (insertErr) throw insertErr;
 
-    // 4. Update pet sharedWithVets array
-    currentList.push(vetUid);
-    await db.collection('pets').doc(pet.id).update({
-      sharedWithVets: currentList
-    });
-
-    // 5. Send notification to vet
-    await db.collection('users').doc(vetUid).collection('notifications').add({
+    await supabase.from('notifications').insert({
+      user_id: vet.id,
       type: 'STATUS_CHANGE',
-      petId: pet.id,
-      message: `You have been granted medical clinical access to pet companion: ${resolvedPetName}.`,
-      timestamp: fb.firestore.FieldValue.serverTimestamp(),
-      read: false
+      message: `You have been granted medical clinical access to pet companion: ${pet.name}.`,
+      is_read: false
     });
 
-    showToast(`Access shared with ${vet.name} successfully!`, "success");
+    showToast(`Access shared with ${vet.display_name || 'the clinic'} successfully!`, "success");
     renderPetDetail({ id: pet.id });
   } catch (err) {
     console.error("Vet authorization error:", err);
@@ -999,19 +878,13 @@ async function requestVetAccess(pet, email) {
   }
 }
 
-async function revokeVetAccess(pet, vetUid) {
+async function revokeVetAccess(pet, accessId) {
   showLoading(true, "Revoking authorization...");
   try {
-    const currentList = pet.sharedWithVets || [];
-    const index = currentList.indexOf(vetUid);
-    if (index > -1) {
-      currentList.splice(index, 1);
-      await db.collection('pets').doc(pet.id).update({
-        sharedWithVets: currentList
-      });
-      showToast("Clinic access privileges revoked.", "info");
-      renderPetDetail({ id: pet.id });
-    }
+    const { error } = await supabase.from('vet_access').delete().eq('id', accessId);
+    if (error) throw error;
+    showToast("Clinic access privileges revoked.", "info");
+    renderPetDetail({ id: pet.id });
   } catch (err) {
     showToast("Failed to revoke access.", "error");
   } finally {
@@ -1024,22 +897,30 @@ async function revokeVetAccess(pet, vetUid) {
  */
 async function loadAuthorizedVetsList(pet, container) {
   if (!container) return;
-  const currentList = pet.sharedWithVets || [];
-  if (currentList.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state-mini" style="padding:1rem 0; text-align: center;">
-        <p style="margin:0; font-size:0.8rem; color:var(--text-muted);">No authorized clinics listed.</p>
-      </div>
-    `;
-    return;
-  }
 
-  container.innerHTML = '';
   try {
-    for (const vetUid of currentList) {
-      const doc = await db.collection('vetProfiles').doc(vetUid).get();
-      const vet = doc.exists ? doc.data() : { name: "Clinic Veterinarian", email: "N/A" };
-      
+    const { data: grants, error } = await supabase
+      .from('vet_access')
+      .select('id, vet_id, users!vet_access_vet_id_fkey(display_name, email, vet_details)')
+      .eq('pet_id', pet.id)
+      .eq('status', 'active');
+
+    if (error) throw error;
+
+    if (!grants || grants.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state-mini" style="padding:1rem 0; text-align: center;">
+          <p style="margin:0; font-size:0.8rem; color:var(--text-muted);">No authorized clinics listed.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = '';
+    grants.forEach(grant => {
+      const vet = grant.users || {};
+      const clinicName = vet.vet_details?.clinicName || vet.display_name || "Clinic";
+
       const item = document.createElement('div');
       item.className = 'reminder-item';
       item.style.background = 'rgba(255,255,255,0.01)';
@@ -1049,22 +930,21 @@ async function loadAuthorizedVetsList(pet, container) {
       item.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:0.5rem;">
           <div style="display:flex; flex-direction:column; gap:0.15rem; font-size:0.75rem;">
-            <strong style="color:var(--text-main);">${vet.name || vet.clinic || "Clinic"}</strong>
-            <span style="color:var(--text-muted); font-size:0.7rem;">${vet.clinic || "Veterinary Clinic"} &bull; ${vet.email || ''}</span>
+            <strong style="color:var(--text-main);">${vet.display_name || "Clinic"}</strong>
+            <span style="color:var(--text-muted); font-size:0.7rem;">${clinicName} &bull; ${vet.email || ''}</span>
           </div>
-          <button class="btn btn-secondary btn-revoke-vet" data-id="${vetUid}" style="font-size:0.65rem; padding:0.3rem 0.6rem; border-color:rgba(230,57,70,0.3); color:var(--accent-red); background:transparent;">
+          <button class="btn btn-secondary btn-revoke-vet" data-id="${grant.id}" style="font-size:0.65rem; padding:0.3rem 0.6rem; border-color:rgba(230,57,70,0.3); color:var(--accent-red); background:transparent;">
             Revoke Access
           </button>
         </div>
       `;
       container.appendChild(item);
-    }
+    });
 
-    // Bind revoke buttons
     container.querySelectorAll('.btn-revoke-vet').forEach(btn => {
       btn.onclick = async () => {
-        const vetUid = btn.getAttribute('data-id');
-        await revokeVetAccess(pet, vetUid);
+        const accessId = btn.getAttribute('data-id');
+        await revokeVetAccess(pet, accessId);
       };
     });
 
@@ -1091,7 +971,6 @@ export async function renderLostPets() {
     </div>
 
     <div id="lost-pets-board" class="pets-grid">
-      <!-- Loading skeletons -->
       <div class="skeleton skeleton-card"></div>
       <div class="skeleton skeleton-card"></div>
     </div>
@@ -1107,18 +986,8 @@ export async function renderLostPets() {
   const paginationContainer = document.getElementById('lost-pets-pagination');
   const loadMoreBtn = document.getElementById('btn-load-more-lost');
 
-  if (!db) {
-    board.innerHTML = `
-      <div class="empty-state">
-        <i class="fa-solid fa-database"></i>
-        <p>Database offline.</p>
-      </div>
-    `;
-    return;
-  }
-
   const pageSize = 12;
-  let lastVisibleDoc = null;
+  let offset = 0;
 
   async function fetchPage(isFirstPage = false) {
     if (isFirstPage) {
@@ -1127,28 +996,27 @@ export async function renderLostPets() {
         <div class="skeleton skeleton-card"></div>
       `;
       paginationContainer.style.display = 'none';
-      lastVisibleDoc = null;
+      offset = 0;
+      showLoading(true, "Loading missing pet alerts...");
     } else {
       loadMoreBtn.disabled = true;
       loadMoreBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Loading...`;
     }
 
     try {
-      let query = db.collection('pets')
-        .where('lostStatus', '==', 'LOST')
-        .limit(pageSize);
+      const { data: rows, error } = await supabase
+        .from('pets')
+        .select('*')
+        .eq('is_lost', true)
+        .range(offset, offset + pageSize - 1);
 
-      if (!isFirstPage && lastVisibleDoc) {
-        query = query.startAfter(lastVisibleDoc);
-      }
-
-      const snapshot = await query.get();
+      if (error) throw error;
 
       if (isFirstPage) {
         board.innerHTML = '';
       }
 
-      if (snapshot.empty) {
+      if (!rows || rows.length === 0) {
         if (isFirstPage) {
           board.innerHTML = `
             <div class="empty-state">
@@ -1164,9 +1032,8 @@ export async function renderLostPets() {
         return;
       }
 
-      snapshot.forEach((doc) => {
-        const pet = doc.data();
-        pet.id = doc.id;
+      rows.forEach((row) => {
+        const pet = mapPetRow(row);
 
         const card = document.createElement('div');
         card.className = 'glass-card pet-card magnetic-card';
@@ -1179,7 +1046,7 @@ export async function renderLostPets() {
             <h4 class="pet-card-name">${pet.name}</h4>
             <div class="pet-card-meta" style="flex-direction: column; gap: 0.25rem;">
               <span><strong>Breed:</strong> ${pet.breed || 'Unknown'}</span>
-              <span><strong>Age:</strong> ${pet.age || 'N/A'}</span>
+              <span><strong>Age:</strong> ${calculateAge(pet.dob) || pet.age || 'N/A'}</span>
               <span style="color: var(--accent-red); margin-top: 0.25rem; font-weight:600;">
                 <i class="fa-solid fa-circle-exclamation"></i> Emergency Phone: ${pet.emergencyContact || 'N/A'}
               </span>
@@ -1194,9 +1061,9 @@ export async function renderLostPets() {
         board.appendChild(card);
       });
 
-      lastVisibleDoc = snapshot.docs[snapshot.docs.length - 1];
+      offset += rows.length;
 
-      if (snapshot.docs.length < pageSize) {
+      if (rows.length < pageSize) {
         paginationContainer.style.display = 'none';
       } else {
         paginationContainer.style.display = 'flex';
@@ -1236,19 +1103,17 @@ export async function renderPetRegisterWizard(params) {
   }
 
   showLoading(true, "Initializing wizard...");
-  
+
   let pet = null;
   if (isEdit) {
     try {
-      const doc = await db.collection('pets').doc(params.id).get();
-      if (doc.exists) {
-        pet = doc.data();
-        pet.id = doc.id;
-      } else {
+      const { data: row, error } = await supabase.from('pets').select('*').eq('id', params.id).single();
+      if (error || !row) {
         showToast("Pet profile not found.", "error");
         Router.navigate('/pets');
         return;
       }
+      pet = mapPetRow(row);
     } catch (err) {
       console.error("Error loading pet:", err);
       showToast("Failed to load pet details.", "error");
@@ -1259,7 +1124,6 @@ export async function renderPetRegisterWizard(params) {
 
   showLoading(false);
 
-  // Initialize wizard state
   const wizardData = {
     name: pet ? (pet.name || '') : '',
     petType: pet ? (pet.petType || 'Dog') : 'Dog',
@@ -1269,19 +1133,16 @@ export async function renderPetRegisterWizard(params) {
     age: pet ? (pet.age || '') : '',
     weight: pet ? (pet.weight || '') : '',
     profileImage: pet ? (pet.profileImage || '') : '',
-    
-    // Species-specific
+
     size: pet ? (pet.size || 'Medium') : 'Medium',
     indoorOutdoor: pet ? (pet.indoorOutdoor || 'Indoor') : 'Indoor',
     neutered: pet ? (pet.neutered || 'Not Neutered') : 'Not Neutered',
 
-    // Step 2: Identity & Tracking
     microchipId: pet ? (pet.microchipId || '') : '',
     adoptionSource: pet ? (pet.adoptionSource || '') : '',
     registrationDate: pet ? (pet.registrationDate || '') : '',
     adoptionDate: pet ? (pet.adoptionDate || '') : '',
 
-    // Step 3: Owner Information
     ownerName: pet ? (pet.ownerName || user.displayName || '') : (user.displayName || ''),
     ownerPhone: pet ? (pet.ownerPhone || '') : '',
     emergencyContactName: pet ? (pet.emergencyContactName || '') : '',
@@ -1292,7 +1153,6 @@ export async function renderPetRegisterWizard(params) {
     state: pet ? (pet.state || '') : '',
     postalCode: pet ? (pet.postalCode || '') : '',
 
-    // Step 4: Medical Profile
     bloodType: pet ? (pet.bloodType || 'Unknown') : 'Unknown',
     insurance: pet ? (pet.insurance || '') : '',
     vaccinationStatus: pet ? (pet.vaccinationStatus || 'Unknown') : 'Unknown',
@@ -1301,7 +1161,6 @@ export async function renderPetRegisterWizard(params) {
     medications: pet ? (pet.medications || '') : '',
     medicalNotes: pet ? (pet.medicalNotes || '') : '',
 
-    // Step 5: Lifestyle & Training
     dietType: pet ? (pet.dietType || 'Kibble') : 'Kibble',
     feedingSchedule: pet ? (pet.feedingSchedule || '') : '',
     activityLevel: pet ? (pet.activityLevel || 'Moderate') : 'Moderate',
@@ -1310,12 +1169,10 @@ export async function renderPetRegisterWizard(params) {
     trainingDetails: pet ? (pet.trainingDetails || '') : '',
     additionalPhotos: pet ? (pet.additionalPhotos || []) : [],
 
-    // Step 6: Recovery Info
     recoveryContact: pet ? (pet.recoveryContact || '') : '',
     recoveryInstructions: pet ? (pet.recoveryInstructions || '') : '',
     rewardAmount: pet ? (pet.rewardAmount || '') : '',
 
-    // Step 7: Privacy Controls
     privacy: pet && pet.privacy ? {
       ownerName: pet.privacy.ownerName !== false,
       phoneNumber: pet.privacy.phoneNumber !== false,
@@ -1340,10 +1197,8 @@ export async function renderPetRegisterWizard(params) {
   let currentStep = 1;
   const totalSteps = 7;
 
-  // Render wizard structural shell
   viewport.innerHTML = `
     <div class="wizard-layout">
-      <!-- Sidebar Checklist -->
       <div class="wizard-sidebar">
         <h4 style="font-family:'Outfit'; font-weight:700; margin-bottom:1rem; color:var(--teal);">Registration Checklist</h4>
         <div class="wizard-step-item active" data-step="1">
@@ -1376,7 +1231,6 @@ export async function renderPetRegisterWizard(params) {
         </div>
       </div>
 
-      <!-- Content Area -->
       <div class="glass-card" style="padding:2rem;">
         <div class="wizard-progress-container">
           <div class="flex-between">
@@ -1391,7 +1245,6 @@ export async function renderPetRegisterWizard(params) {
         <form id="wizard-form" onsubmit="return false;" style="display:flex; flex-direction:column; gap:1.5rem;">
           <div id="wizard-step-panel"></div>
 
-          <!-- Wizard Action Buttons -->
           <div class="wizard-actions">
             <div>
               <button type="button" id="btn-wizard-draft" class="btn btn-secondary">
@@ -1415,18 +1268,15 @@ export async function renderPetRegisterWizard(params) {
     </div>
   `;
 
-  // Render the initial step
   renderStep(1);
 
-  // Define step rendering function
   function renderStep(stepNum) {
     currentStep = stepNum;
     const panel = document.getElementById('wizard-step-panel');
     const stepTitleEl = document.getElementById('wizard-step-title');
     const stepIndicatorEl = document.getElementById('wizard-step-indicator');
     const progressFillEl = document.getElementById('wizard-progress-fill');
-    
-    // Update sidebar styling
+
     const stepItems = document.querySelectorAll('.wizard-step-item');
     stepItems.forEach(item => {
       const stepIdx = parseInt(item.getAttribute('data-step'));
@@ -1438,35 +1288,29 @@ export async function renderPetRegisterWizard(params) {
       }
     });
 
-    // Update headers and progress
     const percentage = Math.round((currentStep / totalSteps) * 100);
     progressFillEl.style.width = `${percentage}%`;
     stepIndicatorEl.textContent = `Step ${currentStep} of ${totalSteps}`;
 
-    // Configure buttons
     const backBtn = document.getElementById('btn-wizard-back');
     const skipBtn = document.getElementById('btn-wizard-skip');
     const nextBtn = document.getElementById('btn-wizard-next');
 
-    // Show/hide Back button
     if (currentStep === 1) {
       backBtn.style.display = 'none';
     } else {
       backBtn.style.display = 'inline-flex';
     }
 
-    // Show/hide Skip button (Optional sections: Steps 2, 4, 5, 7)
     const isOptionalStep = [2, 4, 5, 7].includes(currentStep);
     skipBtn.style.display = isOptionalStep ? 'inline-flex' : 'none';
 
-    // Next/Finish button label
     if (currentStep === totalSteps) {
       nextBtn.innerHTML = isEdit ? 'Save Changes <i class="fa-solid fa-check"></i>' : 'Complete Registration <i class="fa-solid fa-check"></i>';
     } else {
       nextBtn.innerHTML = 'Next <i class="fa-solid fa-arrow-right"></i>';
     }
 
-    // Load Step HTML
     if (currentStep === 1) {
       stepTitleEl.textContent = 'Basic Information';
       panel.innerHTML = `
@@ -1505,7 +1349,7 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-dob">Date of Birth</label>
-            <input type="date" id="w-dob" class="form-control" value="${wizardData.dob}">
+            <input type="date" id="w-dob" class="form-control" value="${wizardData.dob}" max="${new Date().toISOString().split('T')[0]}">
           </div>
           <div class="form-group">
             <label for="w-age">Approximate Age *</label>
@@ -1535,6 +1379,9 @@ export async function renderPetRegisterWizard(params) {
               <p style="font-size:0.75rem; color:var(--text-muted); line-height:1.4;">
                 Add a high quality photo of your pet to help identify them. Max file size: 3MB.
               </p>
+    
+                <i class="fa-solid fa-triangle-exclamation"></i> File uploads are temporarily under maintenance and may not save reliably. We're updating this feature soon.
+              </p>
             </div>
           </div>
         </div>
@@ -1542,7 +1389,6 @@ export async function renderPetRegisterWizard(params) {
         <div id="w-species-specific-container" style="margin-top:0.5rem;"></div>
       `;
 
-      // Setup dynamic type listener & species inputs
       const typeSelect = document.getElementById('w-pet-type');
       typeSelect.onchange = () => {
         wizardData.petType = typeSelect.value;
@@ -1550,18 +1396,21 @@ export async function renderPetRegisterWizard(params) {
       };
       renderSpeciesFields();
 
-      // Setup dynamic age calculation trigger
       const dobInput = document.getElementById('w-dob');
       const ageInput = document.getElementById('w-age');
-      dobInput.onchange = () => {
+      const updateAge = () => {
         if (dobInput.value) {
           const calculated = calculateAge(dobInput.value);
           ageInput.value = calculated;
           wizardData.age = calculated;
         }
       };
+      dobInput.onchange = updateAge;
 
-      // Photo upload click handler
+      if (dobInput.value) {
+        updateAge();
+      }
+
       const photoZone = document.getElementById('w-photo-zone');
       const photoFile = document.getElementById('w-photo-file');
       const photoPreview = document.getElementById('w-photo-preview');
@@ -1759,11 +1608,13 @@ export async function renderPetRegisterWizard(params) {
             <p style="font-size:0.85rem; color:var(--text-muted);">Click to upload additional photos of your pet</p>
             <input type="file" id="w-gallery-files" style="display:none;" accept="image/*" multiple>
           </div>
+          <p style="font-size:0.75rem; color:#e09f3e; margin-top:0.35rem; display:flex; align-items:center; gap:0.35rem;">
+            <i class="fa-solid fa-triangle-exclamation"></i> File uploads are temporarily under maintenance and may not save reliably. We're updating this feature soon.
+          </p>
           <div id="w-gallery-previews" class="gallery-previews-grid"></div>
         </div>
       `;
 
-      // Gallery previews binding
       const galleryZone = document.getElementById('w-gallery-zone');
       const galleryFiles = document.getElementById('w-gallery-files');
       galleryZone.onclick = () => galleryFiles.click();
@@ -1786,14 +1637,12 @@ export async function renderPetRegisterWizard(params) {
 
     } else if (currentStep === 6) {
       stepTitleEl.textContent = 'Recovery Information';
-      
-      // Auto populate contact number if empty
+
       let recContact = wizardData.recoveryContact;
       if (!recContact) {
         recContact = wizardData.ownerPhone || wizardData.emergencyContact || '';
       }
 
-      // Auto populate instructions if empty
       let recInstructions = wizardData.recoveryInstructions;
       if (!recInstructions) {
         recInstructions = "Please keep safe and contact immediately. Pet is friendly but may be scared.";
@@ -1825,7 +1674,7 @@ export async function renderPetRegisterWizard(params) {
         </p>
 
         <div style="display:flex; flex-direction:column; gap:1rem;">
-          
+
           <div class="privacy-toggle-item">
             <div class="switch-label-group">
               <strong>Owner Name</strong>
@@ -1922,7 +1771,7 @@ export async function renderPetRegisterWizard(params) {
   function renderSpeciesFields() {
     const container = document.getElementById('w-species-specific-container');
     if (!container) return;
-    
+
     if (wizardData.petType === 'Dog') {
       container.innerHTML = `
         <div class="form-row">
@@ -1993,7 +1842,6 @@ export async function renderPetRegisterWizard(params) {
     });
   }
 
-  // Handle capturing inputs from the current step's DOM elements
   function saveCurrentStepDOM() {
     if (currentStep === 1) {
       wizardData.name = document.getElementById('w-name').value.trim();
@@ -2003,13 +1851,13 @@ export async function renderPetRegisterWizard(params) {
       wizardData.dob = document.getElementById('w-dob').value;
       wizardData.age = document.getElementById('w-age').value.trim();
       wizardData.weight = parseFloat(document.getElementById('w-weight').value) || '';
-      
+
       const sizeSelect = document.getElementById('w-size');
       if (sizeSelect) wizardData.size = sizeSelect.value;
-      
+
       const inOutSelect = document.getElementById('w-indoor-outdoor');
       if (inOutSelect) wizardData.indoorOutdoor = inOutSelect.value;
-      
+
       const neuteredSelect = document.getElementById('w-neutered');
       if (neuteredSelect) wizardData.neutered = neuteredSelect.value;
 
@@ -2024,19 +1872,19 @@ export async function renderPetRegisterWizard(params) {
       wizardData.ownerPhone = document.getElementById('w-owner-phone').value.trim();
       wizardData.emergencyContactName = document.getElementById('w-emg-name').value.trim();
       wizardData.emergencyContact = document.getElementById('w-emg-phone').value.trim();
-      
+
       const relInput = document.getElementById('w-relationship');
       if (relInput) wizardData.relationship = relInput.value.trim();
-      
+
       const addrInput = document.getElementById('w-address');
       if (addrInput) wizardData.address = addrInput.value.trim();
-      
+
       const cityInput = document.getElementById('w-city');
       if (cityInput) wizardData.city = cityInput.value.trim();
-      
+
       const stateInput = document.getElementById('w-state');
       if (stateInput) wizardData.state = stateInput.value.trim();
-      
+
       const zipInput = document.getElementById('w-zip');
       if (zipInput) wizardData.postalCode = zipInput.value.trim();
 
@@ -2076,13 +1924,27 @@ export async function renderPetRegisterWizard(params) {
     }
   }
 
-  // Validate fields for the current step
   function validateStep() {
     const form = document.getElementById('wizard-form');
-    return form.checkValidity();
+    if (!form.checkValidity()) return false;
+
+    if (currentStep === 1) {
+      const dobInput = document.getElementById('w-dob');
+      if (dobInput && dobInput.value) {
+        const selectedDate = new Date(dobInput.value);
+        const today = new Date();
+        selectedDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        if (selectedDate > today) {
+          showToast("Date of Birth cannot be in the future.", "error");
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
-  // Bind Buttons
   document.getElementById('btn-wizard-back').onclick = () => {
     saveCurrentStepDOM();
     if (currentStep > 1) {
@@ -2091,12 +1953,10 @@ export async function renderPetRegisterWizard(params) {
   };
 
   document.getElementById('btn-wizard-skip').onclick = () => {
-    // Save whatever is entered in the current step without enforcing validation
     saveCurrentStepDOM();
     if (currentStep < totalSteps) {
       renderStep(currentStep + 1);
     } else {
-      // Step 7 Skip: Finish with current values
       finalizeSubmission(false);
     }
   };
@@ -2116,7 +1976,6 @@ export async function renderPetRegisterWizard(params) {
   };
 
   document.getElementById('btn-wizard-draft').onclick = () => {
-    // Read current step inputs, only require Name to save a draft
     saveCurrentStepDOM();
     if (!wizardData.name) {
       showToast("Please enter at least the Pet Name to save a draft.", "warning");
@@ -2133,102 +1992,99 @@ export async function renderPetRegisterWizard(params) {
   async function finalizeSubmission(isDraftFlag) {
     showLoading(true, isDraftFlag ? "Saving draft companion..." : "Registering companion...");
     try {
-      // 1. Upload Images if they are Base64
       let profileImageUrl = wizardData.profileImage;
       if (profileImageUrl && profileImageUrl.startsWith('data:image')) {
-        const path = `pets/${pet ? pet.id : `temp-${Date.now()}`}/profile_${Date.now()}`;
-        profileImageUrl = await uploadImageToStorage(profileImageUrl, path);
+        const blob = await (await fetch(profileImageUrl)).blob();
+        const ext = blob.type.split('/')[1] || 'jpg';
+        profileImageUrl = await uploadToStorage('pet-photos', user.uid, `profile_${Date.now()}.${ext}`, blob);
       }
 
       const additionalPhotosUrls = [];
       for (let i = 0; i < wizardData.additionalPhotos.length; i++) {
         const photo = wizardData.additionalPhotos[i];
         if (photo.startsWith('data:image')) {
-          const path = `pets/${pet ? pet.id : `temp-${Date.now()}`}/gallery_${i}_${Date.now()}`;
-          const url = await uploadImageToStorage(photo, path);
+          const blob = await (await fetch(photo)).blob();
+          const ext = blob.type.split('/')[1] || 'jpg';
+          const url = await uploadToStorage('pet-photos', user.uid, `gallery_${i}_${Date.now()}.${ext}`, blob);
           additionalPhotosUrls.push(url);
         } else {
           additionalPhotosUrls.push(photo);
         }
       }
 
-      // 2. Prepare Pet Document Data
       const petDocData = {
         name: wizardData.name,
-        petType: wizardData.petType,
+        species: wizardData.petType,
         breed: wizardData.breed,
         gender: wizardData.gender,
-        dob: wizardData.dob,
-        age: wizardData.age,
-        weight: wizardData.weight,
-        profileImage: profileImageUrl,
-        
+        date_of_birth: wizardData.dob || null,
+        weight: wizardData.weight || null,
+        photo_url: profileImageUrl,
+
         size: wizardData.size || '',
-        indoorOutdoor: wizardData.indoorOutdoor || '',
+        indoor_outdoor: wizardData.indoorOutdoor || '',
         neutered: wizardData.neutered || '',
 
-        microchipId: wizardData.microchipId,
-        adoptionSource: wizardData.adoptionSource,
-        registrationDate: wizardData.registrationDate,
-        adoptionDate: wizardData.adoptionDate,
+        microchip_id: wizardData.microchipId,
+        adoption_source: wizardData.adoptionSource,
+        registration_date: wizardData.registrationDate || null,
+        adoption_date: wizardData.adoptionDate || null,
 
-        ownerName: wizardData.ownerName,
-        ownerPhone: wizardData.ownerPhone,
-        emergencyContactName: wizardData.emergencyContactName,
-        emergencyContact: wizardData.emergencyContact,
+        owner_name: wizardData.ownerName,
+        owner_phone: wizardData.ownerPhone,
+        emergency_contact_name: wizardData.emergencyContactName,
+        emergency_contact: wizardData.emergencyContact,
         relationship: wizardData.relationship,
         address: wizardData.address,
         city: wizardData.city,
         state: wizardData.state,
-        postalCode: wizardData.postalCode,
+        postal_code: wizardData.postalCode,
 
-        bloodType: wizardData.bloodType,
+        blood_type: wizardData.bloodType,
         insurance: wizardData.insurance,
-        vaccinationStatus: wizardData.vaccinationStatus,
+        vaccination_status: wizardData.vaccinationStatus,
         allergies: wizardData.allergies,
         conditions: wizardData.conditions,
         medications: wizardData.medications,
-        medicalNotes: wizardData.medicalNotes,
+        medical_notes: wizardData.medicalNotes,
 
-        dietType: wizardData.dietType,
-        feedingSchedule: wizardData.feedingSchedule,
-        activityLevel: wizardData.activityLevel,
+        diet_type: wizardData.dietType,
+        feeding_schedule: wizardData.feedingSchedule,
+        activity_level: wizardData.activityLevel,
         treats: wizardData.treats,
-        behaviorNotes: wizardData.behaviorNotes,
-        trainingDetails: wizardData.trainingDetails,
-        additionalPhotos: additionalPhotosUrls,
+        behavior_notes: wizardData.behaviorNotes,
+        training_details: wizardData.trainingDetails,
+        additional_photos: additionalPhotosUrls,
 
-        recoveryContact: wizardData.recoveryContact || wizardData.ownerPhone || wizardData.emergencyContact || '',
-        recoveryInstructions: wizardData.recoveryInstructions || "Please keep safe and contact immediately. Pet is friendly but may be scared.",
-        rewardAmount: wizardData.rewardAmount,
+        recovery_contact: wizardData.recoveryContact || wizardData.ownerPhone || wizardData.emergencyContact || '',
+        recovery_instructions: wizardData.recoveryInstructions || "Please keep safe and contact immediately. Pet is friendly but may be scared.",
+        reward_amount: wizardData.rewardAmount,
 
         privacy: wizardData.privacy,
 
-        ownerId: user.uid,
-        ownerContact: user.email,
-        isDraft: isDraftFlag,
-        lastUpdated: fb.firestore.FieldValue.serverTimestamp()
+        owner_id: user.uid,
+        owner_contact: user.email,
+        is_draft: isDraftFlag,
+        updated_at: new Date().toISOString()
       };
 
-      // 3. Save or Update in Firestore
       let targetId = pet ? pet.id : null;
       if (isEdit && pet) {
-        await db.collection('pets').doc(pet.id).update(petDocData);
+        const { error } = await supabase.from('pets').update(petDocData).eq('id', pet.id);
+        if (error) throw error;
         showToast(isDraftFlag ? `Draft for ${wizardData.name} updated.` : `${wizardData.name} updated successfully!`, "success");
       } else {
         const traceId = await generatePawTraceId();
-        petDocData.pawTraceId = traceId;
-        petDocData.lostStatus = 'SAFE';
-        petDocData.createdAt = fb.firestore.FieldValue.serverTimestamp();
-        petDocData.sharedWithVets = [];
-        petDocData.hasTag = false;
-        
-        const docRef = await db.collection('pets').add(petDocData);
-        targetId = docRef.id;
+        petDocData.pawtrace_id = traceId;
+        petDocData.is_lost = false;
+        petDocData.has_tag = false;
+
+        const { data: inserted, error } = await supabase.from('pets').insert(petDocData).select('id').single();
+        if (error) throw error;
+        targetId = inserted.id;
         showToast(isDraftFlag ? `Draft saved for ${wizardData.name}.` : `${wizardData.name} registered successfully!`, "success");
       }
 
-      // 4. Redirect
       if (isDraftFlag) {
         Router.navigate('/pets');
       } else {
@@ -2242,20 +2098,4 @@ export async function renderPetRegisterWizard(params) {
       showLoading(false);
     }
   }
-
-  // Local helper to upload base64 to Firebase storage
-  async function uploadImageToStorage(base64Data, path) {
-    if (!storage) return base64Data;
-    try {
-      const res = await fetch(base64Data);
-      const blob = await res.blob();
-      const ref = storage.ref(path);
-      const snapshot = await ref.put(blob);
-      return await snapshot.ref.getDownloadURL();
-    } catch (err) {
-      console.warn("Storage upload failed, fallback to Base64:", err);
-      return base64Data;
-    }
-  }
 }
-

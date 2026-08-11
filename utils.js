@@ -1,9 +1,7 @@
 // ==========================================================================
 // PAWTRACE UTILITIES & GLOBAL CONTROLLER INTERFACES
 // ==========================================================================
-
-import { isFirebaseConfigured, db } from './firebase-config.js';
-
+import { supabase } from './supabase-config.js';
 /**
  * Toast notification controller
  * @param {string} message - The message text
@@ -262,6 +260,7 @@ export function calculateAge(dobString) {
   if (!dobString) return "";
   const dob = new Date(dobString);
   const diffMs = Date.now() - dob.getTime();
+  if (diffMs < 0) return "Newborn/Future Date";
   const ageDate = new Date(diffMs);
   const years = Math.abs(ageDate.getUTCFullYear() - 1970);
   
@@ -305,7 +304,32 @@ export function checkFirebaseSetup() {
   }
   return true;
 }
+/**
+ * Upload a file to Supabase Storage. Path must start with the user's own
+ * UID as the first folder segment (required by storage RLS policies).
+ * Returns a public URL for public buckets, or a long-lived signed URL for private ones.
+ */
+export async function uploadToStorage(bucket, userId, subPath, file) {
+  const filePath = `${userId}/${subPath}`;
 
+  const { error: uploadError } = await supabase.storage
+    .from(bucket)
+    .upload(filePath, file, { upsert: true });
+
+  if (uploadError) throw uploadError;
+
+  if (bucket === 'medical-attachments') {
+    // Private bucket — generate a signed URL valid for 10 years (effectively permanent for this app's purposes)
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(filePath, 60 * 60 * 24 * 365 * 10);
+    if (error) throw error;
+    return data.signedUrl;
+  } else {
+    const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    return data.publicUrl;
+  }
+}
 /**
  * Get pet placeholder configuration (emoji/initial and gradient) based on pet type and name.
  */
@@ -363,31 +387,17 @@ export function getPetImageHTML(pet, sizeClass = '') {
  * Handles permission-restricted queries gracefully.
  * @returns {Promise<string>}
  */
+
+
 export async function generatePawTraceId() {
+  const { supabase } = await import('./supabase-config.js');
   while (true) {
     const traceId = 'PT-' + Math.random().toString(36).substr(2, 6).toUpperCase();
-    
-    try {
-      // Check rescued_animals collection (which has general read permission for auth users)
-      const rescueSnap = await db.collection('rescued_animals').where('pawTraceId', '==', traceId).get();
-      if (!rescueSnap.empty) continue;
-      
-      const rescueSnap2 = await db.collection('rescued_animals').where('ptId', '==', traceId).get();
-      if (!rescueSnap2.empty) continue;
-    } catch (e) {
-      console.warn("Skipping rescued_animals check during ID generation due to permission/query restrictions:", e);
+    const { data, error } = await supabase.from('pets').select('id').eq('pawtrace_id', traceId).maybeSingle();
+    if (error) {
+      console.warn("Error checking PawTrace ID uniqueness, assuming unique:", error);
+      return traceId;
     }
-    
-    try {
-      // Check pets collection (which has owner-restricted read permissions)
-      // If this throws "Permission Denied" (expected for standard users/NGOs), we catch it and assume unique
-      const petSnap = await db.collection('pets').where('pawTraceId', '==', traceId).get();
-      if (!petSnap.empty) continue;
-    } catch (e) {
-      console.warn("Skipping pets check during ID generation due to permission/query restrictions:", e);
-    }
-    
-    return traceId;
+    if (!data) return traceId;
   }
 }
-

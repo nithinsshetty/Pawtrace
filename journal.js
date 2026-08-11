@@ -1,13 +1,12 @@
 // ==========================================================================
-// GROWTH JOURNAL & WEIGHT TRACKING MODULE (Chart.js integration)
+// GROWTH JOURNAL & WEIGHT TRACKING MODULE (Supabase, Chart.js integration)
 // ==========================================================================
 
-import { db, storage, fb } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage } from './utils.js';
 import { Router } from './router.js';
 
-// Retain Chart.js reference to avoid duplicate canvas instantiation errors
 let weightChartInstance = null;
 
 /**
@@ -19,46 +18,40 @@ export async function renderJournal(params) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'Growth Journal';
 
-  if (!db) return;
-
   showLoading(true, "Fetching journal records...");
   try {
-    const petDoc = await db.collection('pets').doc(petId).get();
-    if (!petDoc.exists) {
+    const { data: pet, error } = await supabase.from('pets').select('*').eq('id', petId).single();
+    if (error || !pet) {
       showToast("Pet profile not found.", "error");
       Router.navigate('/pets');
       return;
     }
 
-    const pet = petDoc.data();
-    pet.id = petDoc.id;
-
-    // Verify Ownership
     const user = getCurrentUser();
-    if (pet.ownerId !== user.uid) {
+    if (pet.owner_id !== user.uid) {
       showToast("Access Denied.", "error");
       Router.navigate('/pets');
       return;
     }
 
-    // Render page workspace skeleton
+    const petForImage = { name: pet.name, petType: pet.species, profileImage: pet.photo_url };
+
     viewport.innerHTML = `
-      <!-- Pet Detail Header -->
       <div class="glass-card detail-header">
         <div class="detail-avatar">
-          ${getPetImageHTML(pet, 'small')}
+          ${getPetImageHTML(petForImage, 'small')}
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
             <span>${pet.name}</span>
-            <span class="pet-status-badge ${pet.lostStatus === 'LOST' ? 'lost' : 'safe'}">
-              ${pet.lostStatus || 'SAFE'}
+            <span class="pet-status-badge ${pet.is_lost ? 'lost' : 'safe'}">
+              ${pet.is_lost ? 'LOST' : 'SAFE'}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp; 
+            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
             <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
-            <i class="fa-solid fa-id-card"></i> ${pet.pawTraceId}
+            <i class="fa-solid fa-id-card"></i> ${pet.pawtrace_id}
           </p>
         </div>
         <div class="detail-actions">
@@ -68,7 +61,6 @@ export async function renderJournal(params) {
         </div>
       </div>
 
-      <!-- Navigation Tabs -->
       <div class="detail-tabs">
         <a href="#/pet/${pet.id}" class="tab-link" id="tab-profile">Profile Info</a>
         <a href="#/pet/${pet.id}/medical" class="tab-link" id="tab-medical">Medical Log</a>
@@ -76,10 +68,8 @@ export async function renderJournal(params) {
         <a href="#/pet/${pet.id}/journal" class="tab-link active" id="tab-journal">Growth Journal</a>
       </div>
 
-      <!-- Journal Workspace Layout Grid -->
       <div style="display:flex; flex-direction:column; gap:2rem;">
-        
-        <!-- Chart.js Weight Progression Block -->
+
         <div class="glass-card">
           <h3 style="font-weight:700; margin-bottom: 1rem;"><i class="fa-solid fa-chart-line" style="color:var(--teal);"></i> Weight Progression Curve</h3>
           <div style="position:relative; height:250px; width:100%;">
@@ -88,8 +78,7 @@ export async function renderJournal(params) {
         </div>
 
         <div class="grid-cols-3">
-          
-          <!-- Journal Timeline Entries -->
+
           <div class="glass-card" style="grid-column: span 2;">
             <div class="flex-between mb-2">
               <h3 style="font-weight:700;">Journal Timeline</h3>
@@ -97,13 +86,11 @@ export async function renderJournal(params) {
                 <i class="fa-solid fa-plus"></i> Add Log Entry
               </button>
             </div>
-            
+
             <div id="journal-timeline-container" class="timeline">
-              <!-- Journal list will load dynamically -->
             </div>
           </div>
 
-          <!-- Quick access sidebar -->
           <div>
             <div class="glass-card" style="position: sticky; top: 90px; text-align:center;">
               <h4 style="font-weight:700; color:var(--terracotta); margin-bottom:0.5rem;"><i class="fa-solid fa-camera"></i> Journal Memories</h4>
@@ -118,10 +105,8 @@ export async function renderJournal(params) {
       </div>
     `;
 
-    // Bind Add Entry Callback
     document.getElementById('btn-add-journal-entry').onclick = () => showAddJournalModal(petId);
 
-    // Initial load of journal lists & weights data
     await loadJournalEntries(petId);
 
   } catch (error) {
@@ -142,30 +127,27 @@ async function loadJournalEntries(petId) {
   container.innerHTML = `<div class="skeleton-container"><div class="skeleton skeleton-text"></div></div>`;
 
   try {
-    // Fetch journal entries sorted by date (ascending for charts, we'll reverse for the list layout)
-    const snapshot = await db.collection('pets').doc(petId).collection('journal_entries')
-      .orderBy('date', 'asc')
-      .get();
-      
+    const { data: entries, error } = await supabase
+      .from('journal_entries')
+      .select('*')
+      .eq('pet_id', petId)
+      .order('entry_date', { ascending: true });
+
+    if (error) throw error;
+
     container.innerHTML = '';
 
     const labels = [];
     const weights = [];
-    const entries = [];
 
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      data.id = doc.id;
-      
-      labels.push(formatFriendlyDate(data.date));
+    (entries || []).forEach((data) => {
+      labels.push(formatFriendlyDate(data.entry_date));
       weights.push(data.weight || null);
-      entries.push(data);
     });
 
-    // Render the Chart.js Weight progression curve
     drawWeightChart(labels, weights);
 
-    if (entries.length === 0) {
+    if (!entries || entries.length === 0) {
       container.innerHTML = `
         <div class="empty-state-mini">
           <i class="fa-solid fa-note-sticky"></i>
@@ -175,18 +157,17 @@ async function loadJournalEntries(petId) {
       return;
     }
 
-    // Reverse entries for chronological display (most recent first)
     const displayEntries = [...entries].reverse();
 
     displayEntries.forEach((record) => {
       const item = document.createElement('div');
       item.className = 'timeline-item';
-      
+
       let imgMarkup = '';
-      if (record.photo) {
+      if (record.photo_url) {
         imgMarkup = `
           <div style="max-width:300px; max-height:200px; border-radius: var(--radius-sm); overflow:hidden; margin:0.75rem 0; border:1px solid var(--border-glass);">
-            <img src="${record.photo}" style="width:100%; height:100%; object-fit:cover;" alt="Milestone photo">
+            <img src="${record.photo_url}" style="width:100%; height:100%; object-fit:cover;" alt="Milestone photo">
           </div>
         `;
       }
@@ -204,7 +185,7 @@ async function loadJournalEntries(petId) {
         <div class="timeline-dot" style="background:var(--terracotta);"></div>
         <div class="glass-card timeline-content">
           <div class="flex-between">
-            <span class="timeline-date" style="color:var(--terracotta);">${formatFriendlyDate(record.date)}</span>
+            <span class="timeline-date" style="color:var(--terracotta);">${formatFriendlyDate(record.entry_date)}</span>
             <div style="display:flex; gap:0.5rem; align-items:center;">
               ${weightBadge}
               <button class="icon-btn btn-delete-journal" data-id="${record.id}" style="width:28px; height:28px; background:transparent; border:none; color:var(--text-muted);">
@@ -219,7 +200,6 @@ async function loadJournalEntries(petId) {
       container.appendChild(item);
     });
 
-    // Bind Delete Handlers
     container.querySelectorAll('.btn-delete-journal').forEach(btn => {
       btn.onclick = () => {
         const id = btn.getAttribute('data-id');
@@ -241,15 +221,14 @@ function drawWeightChart(labels, data) {
   if (!canvas) return;
 
   const ctx = canvas.getContext('2d');
-  
+
   if (weightChartInstance) {
     weightChartInstance.destroy();
   }
 
-  // Filter labels and data points with values
   const filteredLabels = [];
   const filteredData = [];
-  
+
   for (let i = 0; i < data.length; i++) {
     if (data[i] !== null && data[i] !== undefined) {
       filteredLabels.push(labels[i]);
@@ -258,7 +237,6 @@ function drawWeightChart(labels, data) {
   }
 
   if (filteredData.length === 0) {
-    // Empty state fallback visual
     ctx.font = '14px Outfit, Inter, sans-serif';
     ctx.fillStyle = 'var(--text-muted)';
     ctx.textAlign = 'center';
@@ -266,7 +244,6 @@ function drawWeightChart(labels, data) {
     return;
   }
 
-  // Setup gradient background fill
   const gradient = ctx.createLinearGradient(0, 0, 0, 200);
   gradient.addColorStop(0, 'rgba(31, 122, 140, 0.2)');
   gradient.addColorStop(1, 'rgba(31, 122, 140, 0.0)');
@@ -355,14 +332,12 @@ function showAddJournalModal(petId) {
       const notes = document.getElementById('jour-notes').value.trim();
       const photoInput = document.getElementById('jour-photo');
 
-      // 1. Future Date Guard Check
       const today = new Date().toISOString().split('T')[0];
       if (date > today) {
         showToast("Journal entry date cannot be in the future.", "warning");
         return true;
       }
 
-      // 2. Weight Clamp Safeguard Guard
       if (weightVal !== "") {
         if (weight < 0.1 || weight > 150.0) {
           showToast("Weight must be between 0.1 kg and 150.0 kg.", "warning");
@@ -377,39 +352,28 @@ function showAddJournalModal(petId) {
         const error = validateFile(file, FILE_LIMITS.IMAGE_TYPES, FILE_LIMITS.IMAGE_MAX_SIZE);
         if (error) {
           showToast(error, "warning");
-          return true; // Keep open
+          return true;
         }
-
-        try {
-          if (storage && db) {
-            const ref = storage.ref(`pets/${petId}/journal/${Date.now()}_${file.name}`);
-            const snapshot = await ref.put(file);
-            photoUrl = await snapshot.ref.getDownloadURL();
-          } else {
-            photoUrl = await readFileAsDataURL(file);
-          }
-        } catch (uploadError) {
-          console.warn("Storage upload failed, fallback to base64 formatting:", uploadError);
-          photoUrl = await readFileAsDataURL(file);
-        }
+        const user = getCurrentUser();
+        photoUrl = await uploadToStorage('journal-photos', user.uid, `${petId}/${Date.now()}_${file.name}`, file);
       }
 
       try {
-        // 1. Write the journal entry subcollection
-        await db.collection('pets').doc(petId).collection('journal_entries').add({
-          date,
+        const { error: insertErr } = await supabase.from('journal_entries').insert({
+          pet_id: petId,
+          entry_date: date,
           weight,
           notes,
-          photo: photoUrl,
-          createdAt: fb.firestore.FieldValue.serverTimestamp()
+          photo_url: photoUrl
         });
+        if (insertErr) throw insertErr;
 
-        // 2. If weight is provided, update the primary pet document's weight field!
         if (weight) {
-          await db.collection('pets').doc(petId).update({
-            weight: weight,
-            lastUpdated: fb.firestore.FieldValue.serverTimestamp()
-          });
+          const { error: updateErr } = await supabase
+            .from('pets')
+            .update({ weight, updated_at: new Date().toISOString() })
+            .eq('id', petId);
+          if (updateErr) throw updateErr;
         }
 
         showToast("Journal entry added successfully.", "success");
@@ -435,7 +399,8 @@ function confirmDeleteJournalEntry(petId, entryId) {
     confirmText: "Yes, Delete",
     onConfirm: async () => {
       try {
-        await db.collection('pets').doc(petId).collection('journal_entries').doc(entryId).delete();
+        const { error } = await supabase.from('journal_entries').delete().eq('id', entryId);
+        if (error) throw error;
         showToast("Journal log removed.", "info");
         closeModal();
         loadJournalEntries(petId);

@@ -1,8 +1,8 @@
 // ==========================================================================
-// TEMPORARY CAREGIVER ACCESS MODULE
+// TEMPORARY CAREGIVER ACCESS MODULE (Supabase)
 // ==========================================================================
 
-import { db, fb, auth } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
 import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, validateFile, FILE_LIMITS, readFileAsDataURL, getPetImageHTML } from './utils.js';
 import { Router } from './router.js';
@@ -16,42 +16,39 @@ export async function renderCaregiver(params) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'Caregiver Portal';
 
-  if (!db) {
-    viewport.innerHTML = `<div class="empty-state"><p>Database is not connected.</p></div>`;
-    return;
-  }
-
   showLoading(true, "Authenticating caregiver token...");
   try {
-    // 1. Fetch token details
-    const tokenDoc = await db.collection('caregiver_tokens').doc(token).get();
-    if (!tokenDoc.exists) {
+    const { data: tokenRow, error } = await supabase
+      .from('caregiver_tokens')
+      .select('*')
+      .eq('id', token)
+      .single();
+
+    // RLS already filters out inactive/expired rows for anonymous visitors,
+    // so any failure here means invalid, expired, or revoked — indistinguishable by design.
+    if (error || !tokenRow) {
       renderInvalidTokenState(viewport);
       return;
     }
 
-    const tokenData = tokenDoc.data();
-    tokenData.id = tokenDoc.id; // preserve ID for updates
-    
-    // Check if token is active and not expired
-    const now = new Date();
-    const expiresAt = (tokenData.expiresAt && typeof tokenData.expiresAt.toDate === 'function') 
-      ? tokenData.expiresAt.toDate() 
-      : new Date(tokenData.expiresAt);
-    const isExpired = now > expiresAt;
-    
-    if (!tokenData.active || isExpired) {
-      renderInvalidTokenState(viewport, isExpired);
-      return;
-    }
+    const tokenData = {
+      id: tokenRow.id,
+      petId: tokenRow.pet_id,
+      ownerId: tokenRow.owner_id,
+      active: tokenRow.active,
+      expiresAt: tokenRow.expires_at,
+      permissions: tokenRow.permissions,
+      petDetails: tokenRow.pet_details,
+      medicalRecords: tokenRow.medical_records || [],
+      reminders: tokenRow.reminders || [],
+      journalEntries: tokenRow.journal_entries || []
+    };
 
-    // 2. Fetch associated pet details from embedded snapshot
+    const expiresAt = new Date(tokenData.expiresAt);
     const pet = tokenData.petDetails || {};
     pet.id = tokenData.petId;
 
-    // Render Caregiver workspace layouts
     viewport.innerHTML = `
-      <!-- Caregiver Top Alert Status Banner -->
       <div class="glass-card" style="background: rgba(var(--portal-accent-rgb), 0.08); border-color: var(--portal-accent); padding:1rem; margin-bottom:1.5rem; text-align:center;">
         <h4 style="color:var(--portal-accent); font-weight:700;"><i class="fa-solid fa-user-shield"></i> Caregiver Authorization Active</h4>
         <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">
@@ -59,7 +56,6 @@ export async function renderCaregiver(params) {
         </p>
       </div>
 
-      <!-- Core Pet Info Card -->
       <div class="glass-card detail-header">
         <div class="detail-avatar">
           ${getPetImageHTML(pet, 'small')}
@@ -69,14 +65,13 @@ export async function renderCaregiver(params) {
             <span>${pet.name}</span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            Breed: <strong>${pet.breed}</strong> &nbsp;|&nbsp; 
+            Breed: <strong>${pet.breed}</strong> &nbsp;|&nbsp;
             Gender: <strong>${pet.gender}</strong> &nbsp;|&nbsp;
             Weight: <strong>${pet.weight} kg</strong>
           </p>
         </div>
       </div>
 
-      <!-- Caregiver Navigation Tabs inside same SPA page context -->
       <div class="detail-tabs" id="caregiver-tabs">
         <span class="tab-link active" id="cg-tab-med" style="cursor:pointer;">Medical Logs</span>
         <span class="tab-link" id="cg-tab-rem" style="cursor:pointer;">Reminders</span>
@@ -84,11 +79,9 @@ export async function renderCaregiver(params) {
       </div>
 
       <div id="caregiver-workspace">
-        <!-- Render current caregiver-tab content -->
       </div>
     `;
 
-    // Bind tab clicks manually to avoid standard hash-router intercept
     const cgWorkspace = document.getElementById('caregiver-workspace');
     const tabs = document.querySelectorAll('#caregiver-tabs .tab-link');
 
@@ -102,30 +95,24 @@ export async function renderCaregiver(params) {
     document.getElementById('cg-tab-rem').onclick = () => selectTab('cg-tab-rem', loadCaregiverReminders);
     document.getElementById('cg-tab-jour').onclick = () => selectTab('cg-tab-jour', loadCaregiverJournal);
 
-    // Default load: Medical
     selectTab('cg-tab-med', loadCaregiverMedical);
 
   } catch (error) {
     console.error("Caregiver load error:", error);
-    renderInvalidTokenState(viewport, false);
-    if (error.code !== 'permission-denied') {
-      showToast("Authorization validation failed.", "error");
-    }
+    renderInvalidTokenState(viewport);
   } finally {
     showLoading(false);
   }
 }
 
-function renderInvalidTokenState(container, isExpired = false) {
+function renderInvalidTokenState(container) {
   container.innerHTML = `
     <div class="auth-wrapper">
       <div class="glass-card" style="text-align:center; max-width:450px;">
         <i class="fa-solid fa-ban" style="font-size:3rem; color:var(--accent-red); margin-bottom:1rem;"></i>
-        <h2>${isExpired ? 'Link Expired' : 'Invalid Link'}</h2>
+        <h2>Link Unavailable</h2>
         <p style="color:var(--text-muted); font-size:0.9rem; margin-top:0.5rem; line-height:1.4;">
-          ${isExpired 
-            ? 'This temporary caregiver sharing link has expired. Please request a new link from the pet owner.' 
-            : 'This sharing link is invalid or has been revoked by the owner.'}
+          This sharing link is invalid, has expired, or has been revoked by the owner. Please request a new link.
         </p>
         <a href="#/login" class="btn btn-primary mt-2">Return to PawTrace</a>
       </div>
@@ -141,38 +128,34 @@ async function loadCaregiverMedical(petId, tokenData, container) {
   container.innerHTML = `<div class="glass-card"><div class="timeline" id="cg-med-timeline"></div></div>`;
   const timeline = document.getElementById('cg-med-timeline');
 
-  try {
-    const records = tokenData.medicalRecords || [];
-    if (records.length === 0) {
-      timeline.innerHTML = `<div class="empty-state-mini"><p>No medical records logged.</p></div>`;
-      return;
-    }
-
-    records.forEach(record => {
-      let attachmentMarkup = '';
-      if (record.attachment) {
-        attachmentMarkup = `
-          <a href="${record.attachment}" target="_blank" class="timeline-attachment">
-            <i class="fa-solid fa-file"></i> View Attachment
-          </a>
-        `;
-      }
-      const item = document.createElement('div');
-      item.className = `timeline-item ${record.category.toLowerCase()}`;
-      item.innerHTML = `
-        <div class="timeline-dot"></div>
-        <div class="glass-card timeline-content" style="box-shadow:none; border-color:var(--border-glass);">
-          <span class="timeline-date">${formatFriendlyDate(record.date)}</span>
-          <h4 class="timeline-title">${record.title}</h4>
-          <p class="timeline-body">${record.notes || ''}</p>
-          ${attachmentMarkup}
-        </div>
-      `;
-      timeline.appendChild(item);
-    });
-  } catch (err) {
-    timeline.innerHTML = `<p>Failed to load medical history.</p>`;
+  const records = tokenData.medicalRecords || [];
+  if (records.length === 0) {
+    timeline.innerHTML = `<div class="empty-state-mini"><p>No medical records logged.</p></div>`;
+    return;
   }
+
+  records.forEach(record => {
+    let attachmentMarkup = '';
+    if (record.attachment_url) {
+      attachmentMarkup = `
+        <a href="${record.attachment_url}" target="_blank" class="timeline-attachment">
+          <i class="fa-solid fa-file"></i> View Attachment
+        </a>
+      `;
+    }
+    const item = document.createElement('div');
+    item.className = `timeline-item ${(record.record_type || '').toLowerCase()}`;
+    item.innerHTML = `
+      <div class="timeline-dot"></div>
+      <div class="glass-card timeline-content" style="box-shadow:none; border-color:var(--border-glass);">
+        <span class="timeline-date">${formatFriendlyDate(record.visit_date)}</span>
+        <h4 class="timeline-title">${record.title}</h4>
+        <p class="timeline-body">${record.description || ''}</p>
+        ${attachmentMarkup}
+      </div>
+    `;
+    timeline.appendChild(item);
+  });
 }
 
 async function loadCaregiverReminders(petId, tokenData, container) {
@@ -185,75 +168,81 @@ async function loadCaregiverReminders(petId, tokenData, container) {
   const list = document.getElementById('cg-rem-list');
   const reminders = tokenData.reminders || [];
 
-  try {
-    if (reminders.length === 0) {
-      list.innerHTML = `<div class="empty-state-mini"><p>No active reminders.</p></div>`;
-      return;
-    }
+  if (reminders.length === 0) {
+    list.innerHTML = `<div class="empty-state-mini"><p>No active reminders.</p></div>`;
+    return;
+  }
 
-    reminders.forEach(reminder => {
-      const id = reminder.id;
-      const isOverdue = reminder.dueDate < new Date().toISOString().split('T')[0] && !reminder.completed;
+  reminders.forEach(reminder => {
+    const id = reminder.id;
+    const dueDateOnly = reminder.reminder_date ? reminder.reminder_date.split('T')[0] : '';
+    const isOverdue = dueDateOnly < new Date().toISOString().split('T')[0] && !reminder.is_completed;
 
-      const item = document.createElement('div');
-      item.className = `reminder-item ${reminder.completed ? 'completed' : ''}`;
-      
-      const canToggle = tokenData.permissions.completeReminders;
+    const item = document.createElement('div');
+    item.className = `reminder-item ${reminder.is_completed ? 'completed' : ''}`;
 
-      item.innerHTML = `
-        <div class="reminder-left">
-          <div class="reminder-checkbox ${reminder.completed ? 'checked' : ''} ${canToggle ? '' : 'disabled'}" 
-               data-id="${id}" data-status="${reminder.completed}" style="${canToggle ? '' : 'cursor:not-allowed; opacity:0.6;'}">
-          </div>
-          <div class="reminder-info">
-            <span class="reminder-title">${reminder.title}</span>
-            <span class="reminder-meta">${reminder.type} &bull; Due: ${formatFriendlyDate(reminder.dueDate)}</span>
-          </div>
+    const canToggle = tokenData.permissions.completeReminders;
+
+    item.innerHTML = `
+      <div class="reminder-left">
+        <div class="reminder-checkbox ${reminder.is_completed ? 'checked' : ''} ${canToggle ? '' : 'disabled'}"
+             data-id="${id}" data-status="${reminder.is_completed}" style="${canToggle ? '' : 'cursor:not-allowed; opacity:0.6;'}">
         </div>
-        ${isOverdue ? `<span class="badge-overdue">OVERDUE</span>` : ''}
-      `;
-      list.appendChild(item);
+        <div class="reminder-info">
+          <span class="reminder-title">${reminder.title}</span>
+          <span class="reminder-meta">${reminder.reminder_type} &bull; Due: ${formatFriendlyDate(dueDateOnly)}</span>
+        </div>
+      </div>
+      ${isOverdue ? `<span class="badge-overdue">OVERDUE</span>` : ''}
+    `;
+    list.appendChild(item);
+  });
+
+  if (tokenData.permissions.completeReminders) {
+    list.querySelectorAll('.reminder-checkbox').forEach(box => {
+      box.onclick = async () => {
+        const id = box.getAttribute('data-id');
+        const status = box.getAttribute('data-status') === 'true';
+
+        showLoading(true, "Updating reminder status...");
+        try {
+          const updatedReminders = reminders.map(rem => {
+            if (rem.id === id) {
+              return { ...rem, is_completed: !status };
+            }
+            return rem;
+          });
+
+          const { error } = await supabase
+            .from('caregiver_tokens')
+            .update({ reminders: updatedReminders })
+            .eq('id', tokenData.id);
+          if (error) throw error;
+
+          // Also sync the real reminder row directly, since the caregiver
+          // may not have another chance to trigger a sync (no owner login).
+          const { error: syncErr } = await supabase
+            .from('reminders')
+            .update({ is_completed: !status })
+            .eq('id', id);
+          if (syncErr) console.warn("Reminder sync warning:", syncErr);
+
+          tokenData.reminders = updatedReminders;
+          showToast("Reminder status updated.", "success");
+          loadCaregiverReminders(petId, tokenData, container);
+        } catch (err) {
+          showToast("Failed to complete task.", "error");
+        } finally {
+          showLoading(false);
+        }
+      };
     });
-
-    if (tokenData.permissions.completeReminders) {
-      list.querySelectorAll('.reminder-checkbox').forEach(box => {
-        box.onclick = async () => {
-          const id = box.getAttribute('data-id');
-          const status = box.getAttribute('data-status') === 'true';
-          
-          showLoading(true, "Updating reminder status...");
-          try {
-            const updatedReminders = reminders.map(rem => {
-              if (rem.id === id) {
-                return { ...rem, completed: !status };
-              }
-              return rem;
-            });
-
-            await db.collection('caregiver_tokens').doc(tokenData.id).update({
-              reminders: updatedReminders
-            });
-
-            tokenData.reminders = updatedReminders;
-            showToast("Reminder status updated.", "success");
-            loadCaregiverReminders(petId, tokenData, container);
-          } catch (err) {
-            showToast("Failed to complete task.", "error");
-          } finally {
-            showLoading(false);
-          }
-        };
-      });
-    }
-
-  } catch (err) {
-    list.innerHTML = `<p>Failed to load reminders.</p>`;
   }
 }
 
 async function loadCaregiverJournal(petId, tokenData, container) {
   const canWrite = tokenData.permissions.writeJournal;
-  
+
   container.innerHTML = `
     <div class="grid-split">
       <div class="glass-card">
@@ -275,43 +264,39 @@ async function loadCaregiverJournal(petId, tokenData, container) {
   `;
 
   const timeline = document.getElementById('cg-jour-timeline');
-  await loadCaregiverJournalList(petId, tokenData, timeline);
+  loadCaregiverJournalList(tokenData, timeline);
 
   if (canWrite) {
     document.getElementById('btn-cg-add-journal').onclick = () => showCaregiverJournalModal(petId, tokenData, timeline);
   }
 }
 
-async function loadCaregiverJournalList(petId, tokenData, timelineContainer) {
-  try {
-    const entries = tokenData.journalEntries || [];
-    timelineContainer.innerHTML = '';
-    
-    if (entries.length === 0) {
-      timelineContainer.innerHTML = `<div class="empty-state-mini"><p>No journal history found.</p></div>`;
-      return;
-    }
+function loadCaregiverJournalList(tokenData, timelineContainer) {
+  const entries = tokenData.journalEntries || [];
+  timelineContainer.innerHTML = '';
 
-    entries.forEach(record => {
-      let img = '';
-      if (record.photo) {
-        img = `<img src="${record.photo}" style="max-width:200px; border-radius:var(--radius-sm); margin-top:0.5rem; display:block;">`;
-      }
-      const item = document.createElement('div');
-      item.className = 'timeline-item';
-      item.innerHTML = `
-        <div class="timeline-dot" style="background:var(--terracotta);"></div>
-        <div class="glass-card timeline-content" style="box-shadow:none; border-color:var(--border-glass);">
-          <span class="timeline-date">${formatFriendlyDate(record.date)}</span>
-          <p class="timeline-body">${record.notes}</p>
-          ${img}
-        </div>
-      `;
-      timelineContainer.appendChild(item);
-    });
-  } catch (err) {
-    timelineContainer.innerHTML = `<p>Failed to load journal logs.</p>`;
+  if (entries.length === 0) {
+    timelineContainer.innerHTML = `<div class="empty-state-mini"><p>No journal history found.</p></div>`;
+    return;
   }
+
+  entries.forEach(record => {
+    let img = '';
+    if (record.photo) {
+      img = `<img src="${record.photo}" style="max-width:200px; border-radius:var(--radius-sm); margin-top:0.5rem; display:block;">`;
+    }
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+    item.innerHTML = `
+      <div class="timeline-dot" style="background:var(--terracotta);"></div>
+      <div class="glass-card timeline-content" style="box-shadow:none; border-color:var(--border-glass);">
+        <span class="timeline-date">${formatFriendlyDate(record.date)}</span>
+        <p class="timeline-body">${record.notes}</p>
+        ${img}
+      </div>
+    `;
+    timelineContainer.appendChild(item);
+  });
 }
 
 function showCaregiverJournalModal(petId, tokenData, timelineContainer) {
@@ -353,17 +338,9 @@ function showCaregiverJournalModal(petId, tokenData, timelineContainer) {
           showToast(fileErr, "warning");
           return true;
         }
-        try {
-          if (storage) {
-            const ref = storage.ref(`pets/${petId}/journal/cg_${Date.now()}_${file.name}`);
-            const snapshot = await ref.put(file);
-            photoUrl = await snapshot.ref.getDownloadURL();
-          } else {
-            photoUrl = await readFileAsDataURL(file);
-          }
-        } catch (err) {
-          photoUrl = await readFileAsDataURL(file);
-        }
+        // Caregivers usually aren't logged in as anyone, so Storage RLS (which
+        // requires an owner login) can't apply here — base64 fallback stays for this path.
+        photoUrl = await readFileAsDataURL(file);
       }
 
       try {
@@ -372,19 +349,32 @@ function showCaregiverJournalModal(petId, tokenData, timelineContainer) {
           date,
           notes: `[Caregiver log] ${notes}`,
           photo: photoUrl,
-          createdAt: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          synced: false
         };
 
         const updatedJournal = [newEntry, ...(tokenData.journalEntries || [])];
 
-        await db.collection('caregiver_tokens').doc(tokenData.id).update({
-          journalEntries: updatedJournal
+        const { error } = await supabase
+          .from('caregiver_tokens')
+          .update({ journal_entries: updatedJournal })
+          .eq('id', tokenData.id);
+        if (error) throw error;
+
+        // Best-effort sync into the real journal_entries table right away
+        const { error: syncErr } = await supabase.from('journal_entries').insert({
+          pet_id: petId,
+          entry_date: date,
+          notes: newEntry.notes,
+          photo_url: photoUrl
         });
+        if (!syncErr) newEntry.synced = true;
+        else console.warn("Journal sync warning:", syncErr);
 
         tokenData.journalEntries = updatedJournal;
         showToast("Journal entry added successfully.", "success");
         closeModal();
-        loadCaregiverJournalList(petId, tokenData, timelineContainer);
+        loadCaregiverJournalList(tokenData, timelineContainer);
         return false;
       } catch (err) {
         showToast("Failed to save entry.", "error");
@@ -398,12 +388,7 @@ function showCaregiverJournalModal(petId, tokenData, timelineContainer) {
    CAREGIVER MANAGER FOR OWNERS (Rendered in Pet Details Profile Tab)
    ========================================================================== */
 
-/**
- * Draw Caregiver Management widget inside the owner's pet details profile view
- */
 export async function renderCaregiverManager(petId, containerEl) {
-  if (!db) return;
-
   containerEl.innerHTML = `
     <h3 style="font-weight:700; margin-top:2.5rem; margin-bottom:1rem;">Caregiver Access Manager</h3>
     <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1.5rem;">
@@ -411,16 +396,13 @@ export async function renderCaregiverManager(petId, containerEl) {
     </p>
 
     <div class="grid-split">
-      <!-- Active Token Links Table -->
       <div>
         <h4 style="font-weight:600; margin-bottom:0.75rem;">Active Sharing Keys</h4>
         <div id="caregiver-keys-list" style="display:flex; flex-direction:column; gap:0.75rem;">
-          <!-- Fetched tokens list -->
           <div class="skeleton skeleton-text"></div>
         </div>
       </div>
 
-      <!-- Generator panel -->
       <div class="glass-card" style="padding:1.25rem;">
         <h4 style="font-weight:700; margin-bottom:1rem; color:var(--portal-accent);">Create Caregiver Link</h4>
         <form id="cg-token-form" style="display:flex; flex-direction:column; gap:0.75rem;">
@@ -450,14 +432,12 @@ export async function renderCaregiverManager(petId, containerEl) {
     </div>
   `;
 
-  // Bind token creation form submit
   const form = document.getElementById('cg-token-form');
   form.onsubmit = async (e) => {
     e.preventDefault();
     await generateCaregiverToken(petId, containerEl);
   };
 
-  // Fetch and display active tokens
   await loadActiveCaregiverTokens(petId);
 }
 
@@ -466,72 +446,30 @@ async function loadActiveCaregiverTokens(petId) {
   if (!container) return;
 
   const user = getCurrentUser();
-  if (!user || !db) {
+  if (!user) {
     container.innerHTML = `<div class="empty-state-mini" style="padding:1rem;"><p>Please log in to view sharing keys.</p></div>`;
     return;
   }
 
   try {
-    const snapshot = await db.collection('caregiver_tokens')
-      .where('petId', '==', petId)
-      .where('ownerId', '==', user.uid)
-      .where('active', '==', true)
-      .get();
-      
+    const { data: tokens, error } = await supabase
+      .from('caregiver_tokens')
+      .select('*')
+      .eq('pet_id', petId)
+      .eq('owner_id', user.uid)
+      .eq('active', true);
+
+    if (error) throw error;
+
     container.innerHTML = '';
     let hasKeys = false;
 
-    for (const doc of snapshot.docs) {
-      const data = doc.data();
-      const id = doc.id;
-      const now = new Date();
-      const expiresAt = (data.expiresAt && typeof data.expiresAt.toDate === 'function') 
-        ? data.expiresAt.toDate() 
-        : new Date(data.expiresAt);
-
-      if (now > expiresAt) continue; // skip expired tokens
-
-      // Background Sync Caregiver Updates to Main Pet Records
-      // 1. Sync reminders
-      if (data.reminders) {
-        for (const rem of data.reminders) {
-          try {
-            const mainRemDoc = await db.collection('pets').doc(petId).collection('reminders').doc(rem.id).get();
-            if (mainRemDoc.exists && mainRemDoc.data().completed !== rem.completed) {
-              await db.collection('pets').doc(petId).collection('reminders').doc(rem.id).update({
-                completed: rem.completed,
-                lastUpdated: fb.firestore.FieldValue.serverTimestamp()
-              });
-            }
-          } catch (e) {
-            console.warn("Sitter reminders sync warning:", e);
-          }
-        }
-      }
-
-      // 2. Sync journal entries
-      if (data.journalEntries) {
-        for (const entry of data.journalEntries) {
-          if (entry.id && entry.id.startsWith('cg_')) {
-            try {
-              const mainJourDoc = await db.collection('pets').doc(petId).collection('journal_entries').doc(entry.id).get();
-              if (!mainJourDoc.exists) {
-                await db.collection('pets').doc(petId).collection('journal_entries').doc(entry.id).set({
-                  date: entry.date,
-                  notes: entry.notes,
-                  photo: entry.photo || '',
-                  createdAt: fb.firestore.FieldValue.serverTimestamp()
-                });
-              }
-            } catch (e) {
-              console.warn("Sitter journal sync warning:", e);
-            }
-          }
-        }
-      }
+    for (const tokenRow of (tokens || [])) {
+      const expiresAt = new Date(tokenRow.expires_at);
+      if (new Date() > expiresAt) continue;
 
       hasKeys = true;
-      const shareUrl = `${window.location.origin}${window.location.pathname}#/caregiver/${id}`;
+      const shareUrl = `${window.location.origin}${window.location.pathname}#/caregiver/${tokenRow.id}`;
 
       const row = document.createElement('div');
       row.className = 'glass-card';
@@ -543,14 +481,14 @@ async function loadActiveCaregiverTokens(petId) {
           <div>
             <span style="font-size:0.7rem; color:var(--text-muted); display:block;">EXPIRY: ${expiresAt.toLocaleString()}</span>
             <div style="display:flex; gap:0.5rem; margin:0.35rem 0; font-size:0.75rem;">
-              <span class="pet-status-badge safe" style="background:${data.permissions.completeReminders ? 'var(--portal-accent)' : 'var(--text-muted)'}; font-size:0.6rem; position:static; display:inline-block;">Tasks</span>
-              <span class="pet-status-badge safe" style="background:${data.permissions.writeJournal ? 'var(--portal-accent)' : 'var(--text-muted)'}; font-size:0.6rem; position:static; display:inline-block;">Journal</span>
+              <span class="pet-status-badge safe" style="background:${tokenRow.permissions.completeReminders ? 'var(--portal-accent)' : 'var(--text-muted)'}; font-size:0.6rem; position:static; display:inline-block;">Tasks</span>
+              <span class="pet-status-badge safe" style="background:${tokenRow.permissions.writeJournal ? 'var(--portal-accent)' : 'var(--text-muted)'}; font-size:0.6rem; position:static; display:inline-block;">Journal</span>
             </div>
             <input type="text" class="form-control" value="${shareUrl}" readonly style="padding:0.25rem 0.5rem; font-size:0.7rem; width:220px; background:var(--bg-app);">
           </div>
           <div style="display:flex; gap:0.35rem;">
             <button class="btn btn-outline btn-copy-link" data-url="${shareUrl}" style="padding:0.4rem;"><i class="fa-solid fa-copy"></i></button>
-            <button class="btn btn-danger btn-revoke-link" data-id="${id}" style="padding:0.4rem;"><i class="fa-solid fa-ban"></i></button>
+            <button class="btn btn-danger btn-revoke-link" data-id="${tokenRow.id}" style="padding:0.4rem;"><i class="fa-solid fa-ban"></i></button>
           </div>
         </div>
       `;
@@ -561,7 +499,6 @@ async function loadActiveCaregiverTokens(petId) {
       container.innerHTML = `<div class="empty-state-mini" style="padding:1rem;"><p>No active caregiver keys created.</p></div>`;
     }
 
-    // Bind copy links
     container.querySelectorAll('.btn-copy-link').forEach(btn => {
       btn.onclick = () => {
         const url = btn.getAttribute('data-url');
@@ -570,13 +507,16 @@ async function loadActiveCaregiverTokens(petId) {
       };
     });
 
-    // Bind revoke links
     container.querySelectorAll('.btn-revoke-link').forEach(btn => {
       btn.onclick = async () => {
         const id = btn.getAttribute('data-id');
         showLoading(true, "Revoking access key...");
         try {
-          await db.collection('caregiver_tokens').doc(id).update({ active: false });
+          const { error } = await supabase
+            .from('caregiver_tokens')
+            .update({ active: false })
+            .eq('id', id);
+          if (error) throw error;
           showToast("Caregiver sharing key revoked.", "info");
           loadActiveCaregiverTokens(petId);
         } catch (err) {
@@ -599,74 +539,65 @@ async function generateCaregiverToken(petId, parentContainer) {
   const writeJournal = document.getElementById('cg-perm-jour').checked;
 
   const user = getCurrentUser();
-  if (!user || !db) return;
+  if (!user) return;
 
   const expiresDate = new Date();
   expiresDate.setHours(expiresDate.getHours() + hours);
 
   showLoading(true, "Creating sharing token...");
   try {
-    // 1. Fetch pet details
-    const petDoc = await db.collection('pets').doc(petId).get();
-    if (!petDoc.exists) {
+    const { data: pet, error: petErr } = await supabase.from('pets').select('*').eq('id', petId).single();
+    if (petErr || !pet) {
       showToast("Pet details not found.", "error");
       return;
     }
-    const pet = petDoc.data();
 
-    // 2. Fetch medical records
-    const medicalSnapshot = await db.collection('pets').doc(petId).collection('medical_records').orderBy('date', 'desc').get();
-    const medicalRecords = [];
-    medicalSnapshot.forEach(doc => {
-      medicalRecords.push({ id: doc.id, ...doc.data() });
-    });
+    const { data: medicalRecords } = await supabase
+      .from('medical_records')
+      .select('*')
+      .eq('pet_id', petId)
+      .order('visit_date', { ascending: false });
 
-    // 3. Fetch reminders
-    const remindersSnapshot = await db.collection('pets').doc(petId).collection('reminders').orderBy('dueDate', 'asc').get();
-    const reminders = [];
-    remindersSnapshot.forEach(doc => {
-      reminders.push({ id: doc.id, ...doc.data() });
-    });
+    const { data: reminders } = await supabase
+      .from('reminders')
+      .select('*')
+      .eq('pet_id', petId)
+      .order('reminder_date', { ascending: true });
 
-    // 4. Fetch journal entries
-    const journalSnapshot = await db.collection('pets').doc(petId).collection('journal_entries').orderBy('date', 'desc').get();
-    const journalEntries = [];
-    journalSnapshot.forEach(doc => {
-      journalEntries.push({ id: doc.id, ...doc.data() });
-    });
+    const { data: journalEntries } = await supabase
+      .from('journal_entries')
+      .select('*')
+      .eq('pet_id', petId)
+      .order('entry_date', { ascending: false });
 
-    const tokenData = {
-      petId,
-      ownerId: user.uid,
+    const { error: insertErr } = await supabase.from('caregiver_tokens').insert({
+      pet_id: petId,
+      owner_id: user.uid,
       active: true,
-      expiresAt: expiresDate,
-      createdAt: fb.firestore.FieldValue.serverTimestamp(),
+      expires_at: expiresDate.toISOString(),
       permissions: {
         read: true,
         completeReminders,
         writeJournal
       },
-      petDetails: {
+      pet_details: {
         name: pet.name,
         breed: pet.breed,
         gender: pet.gender,
         weight: pet.weight,
-        profileImage: pet.profileImage || ''
+        profileImage: pet.photo_url || ''
       },
-      medicalRecords,
-      reminders,
-      journalEntries
-    };
+      medical_records: medicalRecords || [],
+      reminders: reminders || [],
+      journal_entries: (journalEntries || []).map(j => ({ ...j, date: j.entry_date, photo: j.photo_url, synced: true }))
+    });
+    if (insertErr) throw insertErr;
 
-    // Add token doc (generating unique random doc ID inside Firestore)
-    const docRef = await db.collection('caregiver_tokens').add(tokenData);
     showToast("Temporary access token configured successfully.", "success");
-    
-    // Reset permissions values
+
     document.getElementById('cg-perm-rem').checked = true;
     document.getElementById('cg-perm-jour').checked = true;
-    
-    // Refresh token tables
+
     await loadActiveCaregiverTokens(petId);
   } catch (err) {
     console.error("Token creation error:", err);

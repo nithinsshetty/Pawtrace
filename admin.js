@@ -1,19 +1,16 @@
 // ==========================================================================
-// PAWTRACE ADMIN PORTAL MODULE
+// PAWTRACE ADMIN PORTAL MODULE (Supabase)
 // ==========================================================================
 
-import { db, fb } from './firebase-config.js';
+import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, formatFriendlyDate, showModal } from './utils.js';
 import { Router } from './router.js';
+import { initPasswordToggles } from './pages.js';
 
 // Hardcoded admin email addresses for fallback verification
 export const ADMIN_EMAILS = [
-  'admin@pawtrace.com',
-  'admin@example.com',
-  'nithin@pawtrace.com',
-  'nss@pawtrace.com',
-  'nithinsshetty3@gmail.com'
+  'nss@pt.com'
 ];
 
 /**
@@ -22,12 +19,14 @@ export const ADMIN_EMAILS = [
 export async function isAdmin() {
   const user = getCurrentUser();
   if (!user) return false;
-  
+
   if (ADMIN_EMAILS.includes(user.email)) return true;
-  
+  if (user.role === 'admin') return true;
+
   try {
-    const userDoc = await db.collection('users').doc(user.uid).get();
-    return userDoc.exists && userDoc.data().role === 'admin';
+    const { data, error } = await supabase.from('users').select('role').eq('id', user.uid).single();
+    if (error) throw error;
+    return data?.role === 'admin';
   } catch (err) {
     console.error("Admin verification error:", err);
     return false;
@@ -59,7 +58,12 @@ export function renderAdminLogin() {
           
           <div class="form-group">
             <label for="admin-password">Password</label>
-            <input type="password" id="admin-password" class="form-control" placeholder="••••••••" required autocomplete="current-password">
+            <div style="position: relative;">
+              <input type="password" id="admin-password" class="form-control" placeholder="••••••••" required autocomplete="current-password" style="padding-right: 2.5rem;">
+              <button type="button" class="password-toggle-btn" aria-label="Toggle password visibility" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 0.25rem;">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+            </div>
           </div>
           
           <button type="submit" class="btn btn-primary btn-full mt-1" style="background: var(--terracotta);">
@@ -74,12 +78,14 @@ export function renderAdminLogin() {
     </div>
   `;
 
+  initPasswordToggles(viewport);
+
   const form = document.getElementById('admin-login-form');
   form.onsubmit = async (e) => {
     e.preventDefault();
     const email = document.getElementById('admin-email').value.trim();
     const password = document.getElementById('admin-password').value;
-    
+
     if (!ADMIN_EMAILS.includes(email)) {
       showToast("Access Denied: Email is not registered as an administrator.", "error");
       return;
@@ -87,7 +93,8 @@ export function renderAdminLogin() {
 
     showLoading(true, "Authenticating Admin...");
     try {
-      await fb.auth().signInWithEmailAndPassword(email, password);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
       showToast("Admin authenticated.", "success");
       Router.navigate('/admin');
     } catch (error) {
@@ -127,10 +134,8 @@ export async function renderAdminDashboard() {
     return;
   }
 
-  // Render the admin workspace container
   viewport.innerHTML = `
     <div id="admin-workspace-container" class="admin-workspace">
-      <!-- Dynamic tab content renders here -->
       <div class="skeleton-container">
         <div class="skeleton skeleton-title"></div>
         <div class="skeleton skeleton-text"></div>
@@ -139,19 +144,16 @@ export async function renderAdminDashboard() {
     </div>
   `;
 
-  // Default to analytics tab on load
   showTab('analytics');
 }
 
 /**
  * Dynamically render the specified admin tab content
- * Called from either the dynamic sidebar actions or manually
  */
 export async function showTab(tabId) {
   const container = document.getElementById('admin-workspace-container');
   if (!container) return;
 
-  // Update active links in admin sidebar manually since they don't change router hash
   document.querySelectorAll('.sidebar-menu .menu-item').forEach(el => {
     if (el.getAttribute('data-tab') === tabId) {
       el.classList.add('active');
@@ -181,27 +183,23 @@ export async function showTab(tabId) {
       case 'announcements':
         await renderAnnouncementsTab(container);
         break;
+      case 'providers':
+        await renderProvidersTab(container);
+        break;
+      case 'reports':
+        await renderReportsTab(container);
+        break;
       default:
         await renderAnalyticsTab(container);
     }
   } catch (error) {
     const currentUser = getCurrentUser();
-    let detectedRole = "unknown";
-    try {
-      if (currentUser && db) {
-        const userDoc = await db.collection('users').doc(currentUser.uid).get();
-        detectedRole = userDoc.exists ? userDoc.data().role : "no-profile";
-      }
-    } catch (e) {
-      detectedRole = "fetch-failed";
-    }
 
     console.error(`[Admin Portal Diagnostics] Failed to load tab "${tabId}":`, {
       error: error.message,
-      errorCode: error.code || "N/A",
       uid: currentUser ? currentUser.uid : "unauthenticated",
       email: currentUser ? currentUser.email : "unauthenticated",
-      detectedRole: detectedRole,
+      detectedRole: currentUser ? currentUser.role : "unknown",
       timestamp: new Date().toISOString()
     });
 
@@ -210,14 +208,13 @@ export async function showTab(tabId) {
         <i class="fa-solid fa-triangle-exclamation" style="font-size: 3.5rem; color: var(--terracotta); margin-bottom: 1.25rem;"></i>
         <h3 style="font-family:'Outfit'; font-weight:800; font-size:1.4rem; color: var(--text-main); margin-bottom: 0.5rem;">Access Denied or Query Failure</h3>
         <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.5rem;">
-          Firestore rejected the request due to missing or insufficient database permissions. This typically happens if your authenticated account is not assigned the "admin" role in the rules.
+          Supabase rejected the request due to missing or insufficient database permissions (RLS policy).
         </p>
         <div style="background: var(--bg-app); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: 1.25rem; text-align: left; font-family: monospace; font-size: 0.75rem; color: var(--text-muted); word-break: break-all; display:flex; flex-direction:column; gap:0.4rem; box-shadow:inset 0 2px 4px rgba(0,0,0,0.02);">
           <div><strong style="color:var(--text-main);">Error Detail:</strong> ${error.message}</div>
           <div><strong style="color:var(--text-main);">Failed Tab:</strong> ${tabId}</div>
           <div><strong style="color:var(--text-main);">Auth UID:</strong> ${currentUser ? currentUser.uid : 'unauthenticated'}</div>
           <div><strong style="color:var(--text-main);">Auth Email:</strong> ${currentUser ? currentUser.email : 'unauthenticated'}</div>
-          <div><strong style="color:var(--text-main);">Firestore Role:</strong> ${detectedRole}</div>
         </div>
       </div>
     `;
@@ -231,54 +228,34 @@ export async function showTab(tabId) {
  */
 
 async function renderAnalyticsTab(container) {
-  let petsSnap, ordersSnap, usersSnap;
-  
-  try {
-    petsSnap = await db.collection('pets').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'pets' collection:", err);
-    throw new Error(`Failed to read 'pets' collection: ${err.message}`);
-  }
+  const { data: pets, error: petsErr } = await supabase.from('pets').select('*');
+  if (petsErr) throw new Error(`Failed to read 'pets' table: ${petsErr.message}`);
 
-  try {
-    ordersSnap = await db.collection('orders').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'orders' collection:", err);
-    throw new Error(`Failed to read 'orders' collection: ${err.message}`);
-  }
+  const { data: orders, error: ordersErr } = await supabase.from('orders').select('*');
+  if (ordersErr) throw new Error(`Failed to read 'orders' table: ${ordersErr.message}`);
 
-  try {
-    usersSnap = await db.collection('users').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'users' collection:", err);
-    throw new Error(`Failed to read 'users' collection: ${err.message}`);
-  }
-  
-  let totalPets = petsSnap.size;
+  const { data: users, error: usersErr } = await supabase.from('users').select('*');
+  if (usersErr) throw new Error(`Failed to read 'users' table: ${usersErr.message}`);
+
+  let totalPets = pets.length;
   let lostPets = 0;
   let taggedPets = 0;
   let petTypes = {};
 
-  petsSnap.forEach(doc => {
-    const pet = doc.data();
-    if (pet.lostStatus === 'LOST') lostPets++;
-    if (pet.hasTag) taggedPets++;
-    
-    const type = pet.type || 'Other';
+  pets.forEach(pet => {
+    if (pet.is_lost) lostPets++;
+    if (pet.has_tag) taggedPets++;
+
+    const type = pet.species || 'Other';
     petTypes[type] = (petTypes[type] || 0) + 1;
   });
 
-  let totalOrders = ordersSnap.size;
-  let pendingOrders = 0;
-  ordersSnap.forEach(doc => {
-    const order = doc.data();
-    if (order.status === 'Pending') pendingOrders++;
-  });
+  let totalOrders = orders.length;
+  let pendingOrders = orders.filter(o => o.status === 'Pending').length;
 
-  const totalUsers = usersSnap.size;
+  const totalUsers = users.length;
   const tagAdoptionRate = totalPets > 0 ? Math.round((taggedPets / totalPets) * 100) : 0;
 
-  // Build type distribution HTML
   let typeDistributionHtml = '';
   const maxCount = Math.max(...Object.values(petTypes), 1);
   for (const [type, count] of Object.entries(petTypes)) {
@@ -302,7 +279,6 @@ async function renderAnalyticsTab(container) {
       <p style="color: var(--text-muted); font-size:0.9rem;">Overview of ecosystem usage metrics and registrations</p>
     </div>
 
-    <!-- Analytics Stat Cards -->
     <div class="metric-grid mb-3">
       <div class="glass-card metric-card">
         <div class="metric-icon teal"><i class="fa-solid fa-paw"></i></div>
@@ -335,7 +311,6 @@ async function renderAnalyticsTab(container) {
     </div>
 
     <div class="grid-cols-2">
-      <!-- Growth Analytics -->
       <div class="glass-card">
         <h3 style="font-family:'Outfit'; font-weight:700; margin-bottom: 1.5rem;">Ecosystem Distribution</h3>
         <div style="display:flex; flex-direction:column; gap:1.25rem;">
@@ -358,7 +333,6 @@ async function renderAnalyticsTab(container) {
         </div>
       </div>
 
-      <!-- Quick Platform Actions -->
       <div class="glass-card" style="display:flex; flex-direction:column; justify-content:space-between;">
         <div>
           <h3 style="font-family:'Outfit'; font-weight:700; margin-bottom: 1rem;">Platform Control Actions</h3>
@@ -385,22 +359,14 @@ async function renderAnalyticsTab(container) {
 }
 
 async function renderOrdersTab(container) {
-  let snapshot;
-  try {
-    snapshot = await db.collection('orders').orderBy('createdAt', 'desc').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'orders' collection:", err);
-    throw new Error(`Failed to read 'orders' collection: ${err.message}`);
-  }
-  
+  const { data: orders, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+  if (error) throw new Error(`Failed to read 'orders' table: ${error.message}`);
+
   let rowsHtml = '';
-  if (snapshot.empty) {
+  if (!orders || orders.length === 0) {
     rowsHtml = `<tr><td colspan="6" class="text-center" style="padding:2rem; color:var(--text-muted);">No smart tag orders found.</td></tr>`;
   } else {
-    snapshot.forEach(doc => {
-      const order = doc.data();
-      order.id = doc.id;
-
+    orders.forEach(order => {
       let statusBadge = '';
       if (order.status === 'Pending') statusBadge = '<span class="pet-status-badge lost" style="background:#e09f3e; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Pending</span>';
       else if (order.status === 'Confirmed') statusBadge = '<span class="pet-status-badge safe" style="background:#3f8efc; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Confirmed</span>';
@@ -408,7 +374,6 @@ async function renderOrdersTab(container) {
       else if (order.status === 'Delivered') statusBadge = '<span class="pet-status-badge safe" style="background:#52b788; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Delivered</span>';
       else if (order.status === 'Activated') statusBadge = '<span class="pet-status-badge safe" style="background:var(--teal); position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Activated</span>';
 
-      // Next Action buttons
       let actionButtons = '';
       if (order.status === 'Pending') {
         actionButtons = `<button class="btn btn-primary btn-sm" onclick="window.Admin.updateOrderStatus('${order.id}', 'Confirmed')" style="font-size:0.7rem; padding:0.35rem 0.6rem;">Confirm</button>`;
@@ -417,7 +382,16 @@ async function renderOrdersTab(container) {
       } else if (order.status === 'Shipped') {
         actionButtons = `<button class="btn btn-sm" onclick="window.Admin.updateOrderStatus('${order.id}', 'Delivered')" style="font-size:0.7rem; padding:0.35rem 0.6rem; background:#52b788; border:none; color:white;">Deliver</button>`;
       } else if (order.status === 'Delivered') {
-        actionButtons = `<button class="btn btn-sm btn-primary" onclick="window.Admin.activatePetQR('${order.id}', '${order.petId}', '${order.ownerId}')" style="font-size:0.7rem; padding:0.35rem 0.6rem;">Activate QR</button>`;
+        actionButtons = `<button class="btn btn-sm btn-primary" onclick="window.Admin.activatePetQR('${order.id}', '${order.pet_id}', '${order.owner_id}')" style="font-size:0.7rem; padding:0.35rem 0.6rem;">Activate QR</button>`;
+      } else if (order.status === 'Activated') {
+        actionButtons = `
+          <div style="display:flex; flex-direction:column; gap:0.25rem; align-items:flex-start;">
+            <span style="font-size:0.75rem; color:var(--text-muted);"><i class="fa-solid fa-circle-check"></i> Fulfilled</span>
+            <button class="btn btn-outline btn-sm" onclick="window.Admin.printPetQR('${order.pet_id}', '${(order.pet_name || '').replace(/'/g, "\\'")}')" style="font-size:0.65rem; padding:0.25rem 0.5rem; display:inline-flex; align-items:center; gap:0.25rem;">
+              <i class="fa-solid fa-print"></i> Print QR Tag
+            </button>
+          </div>
+        `;
       } else {
         actionButtons = `<span style="font-size:0.75rem; color:var(--text-muted);"><i class="fa-solid fa-circle-check"></i> Fulfilled</span>`;
       }
@@ -425,9 +399,9 @@ async function renderOrdersTab(container) {
       rowsHtml += `
         <tr>
           <td><strong style="font-family:monospace; font-size:0.75rem;">${order.id.substr(0, 8)}</strong></td>
-          <td><strong>${order.petName}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${order.ownerName}</span></td>
-          <td><span style="font-size:0.75rem;">${order.address}</span><br><span style="font-size:0.7rem; color:var(--text-muted);">${order.ownerPhone}</span></td>
-          <td><span style="font-size:0.75rem;">${formatFriendlyDate(order.createdAt)}</span></td>
+          <td><strong>${order.pet_name || ''}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${order.owner_name || ''}</span></td>
+          <td><span style="font-size:0.75rem;">${order.address || ''}</span><br><span style="font-size:0.7rem; color:var(--text-muted);">${order.owner_phone || ''}</span></td>
+          <td><span style="font-size:0.75rem;">${formatFriendlyDate(order.created_at)}</span></td>
           <td>${statusBadge}</td>
           <td><div style="display:flex; gap:0.25rem;">${actionButtons}</div></td>
         </tr>
@@ -462,19 +436,11 @@ async function renderOrdersTab(container) {
 }
 
 async function renderUsersTab(container) {
-  let snapshot;
-  try {
-    snapshot = await db.collection('users').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'users' collection:", err);
-    throw new Error(`Failed to read 'users' collection: ${err.message}`);
-  }
-  
-  let rowsHtml = '';
-  snapshot.forEach(doc => {
-    const user = doc.data();
-    user.id = doc.id;
+  const { data: users, error } = await supabase.from('users').select('*');
+  if (error) throw new Error(`Failed to read 'users' table: ${error.message}`);
 
+  let rowsHtml = '';
+  users.forEach(user => {
     let role = (user.role || 'unknown').toLowerCase();
     let roleBadge = '';
     if (role === 'admin') {
@@ -485,27 +451,42 @@ async function renderUsersTab(container) {
       roleBadge = '<span class="pet-status-badge safe" style="background:#e09f3e; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">NGO</span>';
     } else if (role === 'owner' || role === 'customer') {
       roleBadge = '<span class="pet-status-badge safe" style="background:#3f8efc; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Customer</span>';
+    } else if (role === 'service_provider') {
+      roleBadge = '<span class="pet-status-badge safe" style="background:#52b788; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Provider</span>';
     } else {
       roleBadge = '<span class="pet-status-badge safe" style="background:#7f8c8d; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Unknown</span>';
     }
 
-    const joined = user.createdAt ? formatFriendlyDate(user.createdAt) : 'N/A';
-    
-    // Check if account can be promoted/managed
+    const joined = user.created_at ? formatFriendlyDate(user.created_at) : 'N/A';
+
     let actionBtn = '';
+    const currentAdmin = getCurrentUser();
+    const currentAdminId = currentAdmin ? currentAdmin.uid : null;
+    const isHeadAdmin = currentAdmin && ADMIN_EMAILS.includes(currentAdmin.email);
+
     if (user.role !== 'admin') {
-      actionBtn = `<button class="btn btn-outline btn-sm" onclick="window.Admin.makeUserAdmin('${user.id}', '${user.displayName}')" style="font-size:0.7rem; padding:0.35rem 0.5rem;">Make Admin</button>`;
+      if (isHeadAdmin) {
+        actionBtn = `<button class="btn btn-outline btn-sm" onclick="window.Admin.makeUserAdmin('${user.id}', '${(user.display_name || '').replace(/'/g, "\\'")}')" style="font-size:0.7rem; padding:0.35rem 0.5rem;">Make Admin</button>`;
+      } else {
+        actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">-</span>`;
+      }
+    } else if (user.id === currentAdminId) {
+      actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Active Session</span>`;
     } else {
-      actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Admin Account</span>`;
+      if (isHeadAdmin) {
+        actionBtn = `<button class="btn btn-danger btn-sm" onclick="window.Admin.demoteAdmin('${user.id}', '${(user.display_name || '').replace(/'/g, "\\'")}')" style="font-size:0.7rem; padding:0.35rem 0.5rem; background:#e63946; border:none; color:white;">Revoke Admin</button>`;
+      } else {
+        actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Admin Account</span>`;
+      }
     }
 
     rowsHtml += `
       <tr class="user-row-item">
         <td>
           <div style="display:flex; align-items:center; gap:0.5rem;">
-            <img src="${user.photoURL || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.id}" style="width:30px; height:30px; border-radius:50%; object-fit:cover;">
+            <img src="${user.photo_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.id}" style="width:30px; height:30px; border-radius:50%; object-fit:cover;">
             <div>
-              <strong>${user.displayName || 'Unnamed'}</strong><br>
+              <strong>${user.display_name || 'Unnamed'}</strong><br>
               <span style="font-size:0.7rem; color:var(--text-muted);">${user.email}</span>
             </div>
           </div>
@@ -545,13 +526,12 @@ async function renderUsersTab(container) {
     </div>
   `;
 
-  // Bind live row filtering search
   const searchInput = document.getElementById('admin-user-search');
   const tbody = document.getElementById('admin-users-tbody');
   searchInput.oninput = () => {
     const query = searchInput.value.trim().toLowerCase();
     const rows = tbody.querySelectorAll('.user-row-item');
-    
+
     rows.forEach(row => {
       const text = row.textContent.toLowerCase();
       if (text.includes(query)) {
@@ -564,29 +544,21 @@ async function renderUsersTab(container) {
 }
 
 async function renderDoctorsTab(container) {
-  // Query all users where role == 'vet'
-  let snapshot;
-  try {
-    snapshot = await db.collection('users').where('role', '==', 'vet').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'users' for vet roles:", err);
-    throw new Error(`Failed to read users collection (vet role filter): ${err.message}`);
-  }
-  
+  const { data: vets, error } = await supabase.from('users').select('*').eq('role', 'vet');
+  if (error) throw new Error(`Failed to read users table (vet role filter): ${error.message}`);
+
   let rowsHtml = '';
-  if (snapshot.empty) {
+  if (!vets || vets.length === 0) {
     rowsHtml = `<tr><td colspan="5" class="text-center" style="padding:2rem; color:var(--text-muted);">No registered veterinarian clinics found.</td></tr>`;
   } else {
-    snapshot.forEach(doc => {
-      const vet = doc.data();
-      vet.id = doc.id;
+    vets.forEach(vet => {
+      const details = vet.vet_details || {};
+      const isVerified = details.verified;
+      const license = details.licenseNumber || 'N/A';
+      const clinicName = details.clinicName || vet.display_name || 'Clinic';
+      const specs = (details.specializations || []).join(', ') || 'General Medicine';
 
-      const isVerified = vet.vetDetails?.verified;
-      const license = vet.vetDetails?.licenseNumber || 'N/A';
-      const clinicName = vet.vetDetails?.clinicName || vet.displayName || 'Clinic';
-      const specs = vet.vetDetails?.specializations?.join(', ') || 'General Medicine';
-
-      let statusBadge = isVerified 
+      let statusBadge = isVerified
         ? '<span class="pet-status-badge safe" style="background:#52b788; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-circle-check"></i> Verified</span>'
         : '<span class="pet-status-badge lost" style="background:#e09f3e; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-clock"></i> Pending Approval</span>';
 
@@ -632,29 +604,21 @@ async function renderDoctorsTab(container) {
 }
 
 async function renderNgosTab(container) {
-  // Query all users where role == 'ngo'
-  let snapshot;
-  try {
-    snapshot = await db.collection('users').where('role', '==', 'ngo').get();
-  } catch (err) {
-    console.error("[Admin Portal Diagnostics] Failed to query 'users' for ngo roles:", err);
-    throw new Error(`Failed to read users collection (ngo role filter): ${err.message}`);
-  }
-  
+  const { data: ngos, error } = await supabase.from('users').select('*').eq('role', 'ngo');
+  if (error) throw new Error(`Failed to read users table (ngo role filter): ${error.message}`);
+
   let rowsHtml = '';
-  if (snapshot.empty) {
+  if (!ngos || ngos.length === 0) {
     rowsHtml = `<tr><td colspan="5" class="text-center" style="padding:2rem; color:var(--text-muted);">No rescue organizations found.</td></tr>`;
   } else {
-    snapshot.forEach(doc => {
-      const ngo = doc.data();
-      ngo.id = doc.id;
+    ngos.forEach(ngo => {
+      const details = ngo.ngo_details || {};
+      const isApproved = details.approved;
+      const regId = details.registrationId || 'N/A';
+      const orgName = details.orgName || ngo.display_name || 'Organization';
+      const location = details.location || 'Unknown';
 
-      const isApproved = ngo.ngoDetails?.approved;
-      const regId = ngo.ngoDetails?.registrationId || 'N/A';
-      const orgName = ngo.ngoDetails?.orgName || ngo.displayName || 'Organization';
-      const location = ngo.ngoDetails?.location || 'Unknown';
-
-      let statusBadge = isApproved 
+      let statusBadge = isApproved
         ? '<span class="pet-status-badge safe" style="background:#52b788; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-circle-check"></i> Approved</span>'
         : '<span class="pet-status-badge lost" style="background:#e09f3e; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-clock"></i> Pending Approval</span>';
 
@@ -744,25 +708,24 @@ async function renderAnnouncementsTab(container) {
 export async function updateOrderStatus(orderId, newStatus) {
   showLoading(true, "Updating order status...");
   try {
-    const timestampField = 
-      newStatus === 'Confirmed' ? 'confirmedAt' :
-      newStatus === 'Shipped' ? 'shippedAt' : 'deliveredAt';
+    const timestampField =
+      newStatus === 'Confirmed' ? 'confirmed_at' :
+      newStatus === 'Shipped' ? 'shipped_at' : 'delivered_at';
 
-    await db.collection('orders').doc(orderId).update({
-      status: newStatus,
-      [timestampField]: fb.firestore.FieldValue.serverTimestamp()
-    });
+    const { error: updateErr } = await supabase
+      .from('orders')
+      .update({ status: newStatus, [timestampField]: new Date().toISOString() })
+      .eq('id', orderId);
+    if (updateErr) throw updateErr;
 
-    // Notify customer
-    const orderDoc = await db.collection('orders').doc(orderId).get();
-    const order = orderDoc.data();
+    const { data: order, error: fetchErr } = await supabase.from('orders').select('*').eq('id', orderId).single();
+    if (fetchErr) throw fetchErr;
 
-    await db.collection('users').doc(order.ownerId).collection('notifications').add({
+    await supabase.from('notifications').insert({
+      user_id: order.owner_id,
       type: 'STATUS_CHANGE',
-      petId: order.petId,
       message: `Your smart tag order status is now: ${newStatus.toUpperCase()}.`,
-      timestamp: fb.firestore.FieldValue.serverTimestamp(),
-      read: false
+      is_read: false
     });
 
     showToast(`Order status updated to ${newStatus}.`, "success");
@@ -778,30 +741,26 @@ export async function updateOrderStatus(orderId, newStatus) {
 export async function activatePetQR(orderId, petId, ownerId) {
   showLoading(true, "Activating Collar QR Code...");
   try {
-    // 1. Update order status to Activated
-    await db.collection('orders').doc(orderId).update({
-      status: 'Activated',
-      qrActivated: true,
-      qrActivatedAt: fb.firestore.FieldValue.serverTimestamp()
-    });
+    const { error: orderErr } = await supabase
+      .from('orders')
+      .update({ status: 'Activated', qr_activated: true, qr_activated_at: new Date().toISOString() })
+      .eq('id', orderId);
+    if (orderErr) throw orderErr;
 
-    // 2. Set hasTag to true on the pet profile
-    await db.collection('pets').doc(petId).update({
-      hasTag: true,
-      tagOrderId: orderId,
-      tagActivatedAt: fb.firestore.FieldValue.serverTimestamp()
-    });
+    const { error: petErr } = await supabase
+      .from('pets')
+      .update({ has_tag: true, tag_order_id: orderId, tag_activated_at: new Date().toISOString() })
+      .eq('id', petId);
+    if (petErr) throw petErr;
 
-    // 3. Notify owner
-    const petDoc = await db.collection('pets').doc(petId).get();
-    const petName = petDoc.data().name;
+    const { data: pet, error: fetchErr } = await supabase.from('pets').select('name').eq('id', petId).single();
+    if (fetchErr) throw fetchErr;
 
-    await db.collection('users').doc(ownerId).collection('notifications').add({
+    await supabase.from('notifications').insert({
+      user_id: ownerId,
       type: 'STATUS_CHANGE',
-      petId: petId,
-      message: `🎉 Celebration Alert: Your PawTrace QR pendant for ${petName} is now LIVE! View your pet details to verify.`,
-      timestamp: fb.firestore.FieldValue.serverTimestamp(),
-      read: false
+      message: `🎉 Celebration Alert: Your PawTrace QR pendant for ${pet.name} is now LIVE! View your pet details to verify.`,
+      is_read: false
     });
 
     showToast("Smart Tag activated successfully!", "success");
@@ -815,11 +774,16 @@ export async function activatePetQR(orderId, petId, ownerId) {
 }
 
 export async function makeUserAdmin(userId, displayName) {
+  const currentAdmin = getCurrentUser();
+  if (!currentAdmin || !ADMIN_EMAILS.includes(currentAdmin.email)) {
+    showToast("Permission Denied. Only the head administrator can grant admin access.", "error");
+    return;
+  }
+
   showLoading(true, "Granting admin role...");
   try {
-    await db.collection('users').doc(userId).update({
-      role: 'admin'
-    });
+    const { error } = await supabase.from('users').update({ role: 'admin' }).eq('id', userId);
+    if (error) throw error;
     showToast(`Successfully granted Admin access to ${displayName}.`, "success");
     showTab('users');
   } catch (err) {
@@ -829,20 +793,51 @@ export async function makeUserAdmin(userId, displayName) {
   }
 }
 
+export async function demoteAdmin(userId, displayName) {
+  const currentAdmin = getCurrentUser();
+  if (!currentAdmin || !ADMIN_EMAILS.includes(currentAdmin.email)) {
+    showToast("Permission Denied. Only the head administrator can revoke admin access.", "error");
+    return;
+  }
+
+  if (currentAdmin.uid === userId) {
+    showToast("Self-demotion is prohibited. You cannot revoke your own administrator privileges.", "warning");
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to revoke Admin privileges from ${displayName}?`)) return;
+
+  showLoading(true, "Revoking admin role...");
+  try {
+    const { error } = await supabase.from('users').update({ role: 'customer' }).eq('id', userId);
+    if (error) throw error;
+    showToast(`Successfully revoked Admin access from ${displayName}.`, "success");
+    showTab('users');
+  } catch (err) {
+    showToast("Failed to revoke admin access.", "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
 export async function toggleDoctorVerification(vetId, verify) {
   showLoading(true, "Updating veterinarian verification status...");
   try {
-    await db.collection('users').doc(vetId).update({
-      'vetDetails.verified': verify
-    });
+    const { data: vet, error: fetchErr } = await supabase.from('users').select('vet_details').eq('id', vetId).single();
+    if (fetchErr) throw fetchErr;
 
-    await db.collection('users').doc(vetId).collection('notifications').add({
+    const updatedDetails = { ...(vet.vet_details || {}), verified: verify };
+
+    const { error: updateErr } = await supabase.from('users').update({ vet_details: updatedDetails }).eq('id', vetId);
+    if (updateErr) throw updateErr;
+
+    await supabase.from('notifications').insert({
+      user_id: vetId,
       type: 'STATUS_CHANGE',
-      message: verify 
+      message: verify
         ? "Congratulations! Your clinic license has been verified. Owners can now authorize patient access."
         : "Verification notice: Your clinic license verification status has been revoked.",
-      timestamp: fb.firestore.FieldValue.serverTimestamp(),
-      read: false
+      is_read: false
     });
 
     showToast(verify ? "Doctor verified successfully." : "Verification status revoked.", "info");
@@ -857,17 +852,21 @@ export async function toggleDoctorVerification(vetId, verify) {
 export async function toggleNgoApproval(ngoId, approve) {
   showLoading(true, "Updating NGO approval status...");
   try {
-    await db.collection('users').doc(ngoId).update({
-      'ngoDetails.approved': approve
-    });
+    const { data: ngo, error: fetchErr } = await supabase.from('users').select('ngo_details').eq('id', ngoId).single();
+    if (fetchErr) throw fetchErr;
 
-    await db.collection('users').doc(ngoId).collection('notifications').add({
+    const updatedDetails = { ...(ngo.ngo_details || {}), approved: approve };
+
+    const { error: updateErr } = await supabase.from('users').update({ ngo_details: updatedDetails }).eq('id', ngoId);
+    if (updateErr) throw updateErr;
+
+    await supabase.from('notifications').insert({
+      user_id: ngoId,
       type: 'STATUS_CHANGE',
-      message: approve 
+      message: approve
         ? "Congratulations! Your NGO registration status is APPROVED. Case tracking is active."
         : "Alert: Your NGO registration verification status has been suspended.",
-      timestamp: fb.firestore.FieldValue.serverTimestamp(),
-      read: false
+      is_read: false
     });
 
     showToast(approve ? "NGO approved successfully." : "Approval status revoked.", "info");
@@ -882,33 +881,21 @@ export async function toggleNgoApproval(ngoId, approve) {
 async function broadcastAnnouncement(title, message) {
   showLoading(true, "Broadcasting global announcement...");
   try {
-    const usersSnap = await db.collection('users').get();
-    
-    // Break into batches of 450 (Firestore limit is 500 writes per batch)
-    let batch = db.batch();
-    let count = 0;
-    
-    for (const doc of usersSnap.docs) {
-      const user = doc.data();
-      const notifRef = db.collection('users').doc(user.uid).collection('notifications').doc();
-      
-      batch.set(notifRef, {
-        type: 'STATUS_CHANGE',
-        message: `📢 ${title}: ${message}`,
-        timestamp: fb.firestore.FieldValue.serverTimestamp(),
-        read: false
-      });
-      
-      count++;
-      if (count === 400) {
-        await batch.commit();
-        batch = db.batch();
-        count = 0;
-      }
-    }
-    
-    if (count > 0) {
-      await batch.commit();
+    const { data: users, error: usersErr } = await supabase.from('users').select('id');
+    if (usersErr) throw usersErr;
+
+    const notifRows = users.map(u => ({
+      user_id: u.id,
+      type: 'STATUS_CHANGE',
+      message: `📢 ${title}: ${message}`,
+      is_read: false
+    }));
+
+    // Insert in chunks of 400 to stay well under any request size limits
+    for (let i = 0; i < notifRows.length; i += 400) {
+      const chunk = notifRows.slice(i, i + 400);
+      const { error: insertErr } = await supabase.from('notifications').insert(chunk);
+      if (insertErr) throw insertErr;
     }
 
     showToast("Global announcement broadcasted successfully!", "success");
@@ -922,12 +909,269 @@ async function broadcastAnnouncement(title, message) {
   }
 }
 
-// Bind to window context so that inline HTML onclick event actions can execute properly
+async function renderProvidersTab(container) {
+  const { data: providers, error } = await supabase.from('service_providers').select('*');
+  if (error) throw new Error(`Failed to read service_providers: ${error.message}`);
+
+  let rowsHtml = '';
+  if (!providers || providers.length === 0) {
+    rowsHtml = `<tr><td colspan="6" class="text-center" style="padding:2rem; color:var(--text-muted);">No service providers registered.</td></tr>`;
+  } else {
+    for (const p of providers) {
+      const { data: uData } = await supabase.from('users').select('display_name, email').eq('id', p.user_id).single();
+      const userInfo = uData || { display_name: "Care Sitter", email: "N/A" };
+
+      const statusBadge = p.status === 'approved'
+        ? '<span class="pet-status-badge safe" style="position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-circle-check"></i> Approved</span>'
+        : p.status === 'pending'
+        ? '<span class="pet-status-badge pending" style="position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-clock"></i> Pending</span>'
+        : '<span class="pet-status-badge lost" style="position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;"><i class="fa-solid fa-ban"></i> Suspended</span>';
+
+      const actionButton = p.status === 'approved'
+        ? `<button class="btn btn-danger btn-sm" onclick="window.Admin.toggleProviderStatus('${p.user_id}', 'suspended')" style="font-size:0.7rem; padding:0.35rem 0.6rem;">Suspend</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="window.Admin.toggleProviderStatus('${p.user_id}', 'approved')" style="font-size:0.7rem; padding:0.35rem 0.6rem; background:#52b788; border:none; color:white;">Approve</button>`;
+
+      rowsHtml += `
+        <tr>
+          <td><strong>${userInfo.display_name}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${userInfo.email}</span></td>
+          <td><span style="font-weight:600; font-size:0.75rem; text-transform:uppercase;">${p.provider_type || ''}</span></td>
+          <td><span style="font-size:0.75rem;">$${p.rate}/hr</span></td>
+          <td><span style="font-size:0.75rem;">${p.location || ''}</span></td>
+          <td>
+            ${p.id_proof_url ? `<a href="${p.id_proof_url}" target="_blank" class="text-link" style="font-size:0.75rem;"><i class="fa-solid fa-file-contract"></i> View ID</a>` : '<span style="font-size:0.75rem; color:var(--text-muted);">None</span>'}
+          </td>
+          <td>${statusBadge}</td>
+          <td>${actionButton}</td>
+        </tr>
+      `;
+    }
+  }
+
+  container.innerHTML = `
+    <div style="margin-bottom: 2rem;">
+      <h2 style="font-family:'Outfit'; font-weight:800; font-size:1.6rem;">Independent Service Partners</h2>
+      <p style="color: var(--text-muted); font-size:0.9rem;">Approve independent dog walkers, sitters, taxis, and groomer credentials</p>
+    </div>
+
+    <div class="glass-card" style="padding: 0; overflow-x: auto;">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Provider Name</th>
+            <th>Category</th>
+            <th>Base Rate</th>
+            <th>Service Area</th>
+            <th>ID Proof</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function renderReportsTab(container) {
+  const { data: reports, error } = await supabase.from('reports').select('*');
+  if (error) throw new Error(`Failed to read reports: ${error.message}`);
+
+  let rowsHtml = '';
+  if (!reports || reports.length === 0) {
+    rowsHtml = `<tr><td colspan="7" class="text-center" style="padding:2rem; color:var(--text-muted);">No reports filed.</td></tr>`;
+  } else {
+    for (const r of reports) {
+      const dateStr = r.created_at ? formatFriendlyDate(r.created_at) : 'N/A';
+
+      const statusBadge = r.status === 'resolved'
+        ? '<span class="pet-status-badge safe" style="position:static; display:inline-block; font-size:0.7rem;"><i class="fa-solid fa-circle-check"></i> Resolved</span>'
+        : '<span class="pet-status-badge lost" style="position:static; display:inline-block; font-size:0.7rem;"><i class="fa-solid fa-clock"></i> Active</span>';
+
+      let actionButtons = '';
+      if (r.status !== 'resolved') {
+        actionButtons = `
+          <button class="btn btn-primary btn-sm" onclick="window.Admin.moderateReport('${r.id}', 'penalize')" style="font-size:0.7rem; padding:0.35rem 0.6rem; background:var(--accent-red); border:none; color:white;">Penalize</button>
+          <button class="btn btn-outline btn-sm mt-1" onclick="window.Admin.moderateReport('${r.id}', 'dismiss')" style="font-size:0.7rem; padding:0.35rem 0.6rem;">Dismiss</button>
+        `;
+      } else {
+        actionButtons = '<span style="font-size:0.75rem; color:var(--text-muted);">No action required</span>';
+      }
+
+      rowsHtml += `
+        <tr>
+          <td><span style="font-size:0.75rem; font-family:monospace;">${r.id}</span></td>
+          <td><span style="font-size:0.75rem; font-weight:600; text-transform:uppercase;">${r.target_type}</span><br><span style="font-size:0.65rem; color:var(--text-muted); font-family:monospace;">${r.target_id}</span></td>
+          <td><span style="font-size:0.75rem; font-family:monospace;">${r.reporter_user_id || ''}</span></td>
+          <td><strong>${r.reason}</strong></td>
+          <td><p style="font-size:0.75rem; color:var(--text-muted); max-width:200px; word-wrap:break-word; margin:0;">${r.details || ''}</p></td>
+          <td><span style="font-size:0.75rem;">${dateStr}</span></td>
+          <td>${statusBadge}</td>
+          <td><div style="display:flex; flex-direction:column; gap:0.25rem;">${actionButtons}</div></td>
+        </tr>
+      `;
+    }
+  }
+
+  container.innerHTML = `
+    <div style="margin-bottom: 2rem;">
+      <h2 style="font-family:'Outfit'; font-weight:800; font-size:1.6rem;">Flagged Safety Reports</h2>
+      <p style="color: var(--text-muted); font-size:0.9rem;">Moderate flagged listings, spam, scam reports, or provider misconduct</p>
+    </div>
+
+    <div class="glass-card" style="padding: 0; overflow-x: auto;">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Report ID</th>
+            <th>Target Info</th>
+            <th>Reporter UID</th>
+            <th>Reason</th>
+            <th>Details</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+export async function toggleProviderStatus(providerId, status) {
+  showLoading(true, "Updating provider status...");
+  try {
+    const { error } = await supabase.from('service_providers').update({ status }).eq('user_id', providerId);
+    if (error) throw error;
+
+    await supabase.from('notifications').insert({
+      user_id: providerId,
+      type: 'STATUS_CHANGE',
+      message: status === 'approved'
+        ? "Congratulations! Your independent service profile has been APPROVED."
+        : "Alert: Your independent service profile listing has been suspended.",
+      is_read: false
+    });
+
+    showToast(status === 'approved' ? "Provider listing approved successfully." : "Provider listing suspended.", "info");
+    showTab('providers');
+  } catch (err) {
+    console.error("Provider status update error:", err);
+    showToast("Database update error.", "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
+export async function moderateReport(reportId, action) {
+  showLoading(true, "Processing moderation response...");
+  try {
+    const { data: r, error: fetchErr } = await supabase.from('reports').select('*').eq('id', reportId).single();
+    if (fetchErr) throw fetchErr;
+    if (!r) {
+      showToast("Report not found.", "warning");
+      return;
+    }
+
+    if (action === 'penalize') {
+      if (r.target_type === 'provider') {
+        await supabase.from('service_providers').update({ status: 'suspended' }).eq('user_id', r.target_id);
+
+        await supabase.from('notifications').insert({
+          user_id: r.target_id,
+          type: 'STATUS_CHANGE',
+          message: "Alert: Your service profile has been suspended following community safety reports.",
+          is_read: false
+        });
+      }
+      // NOTE: marketplace 'listing' moderation depends on a petListings table
+      // that hasn't been migrated to Supabase yet — will be wired up when
+      // listings.js is rewritten.
+    }
+
+    await supabase.from('reports').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', reportId);
+
+    showToast(action === 'penalize' ? "Moderation action applied. Report marked resolved." : "Report dismissed.", "success");
+    showTab('reports');
+  } catch (err) {
+    console.error("Moderation report error:", err);
+    showToast("Moderation database update error.", "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Renders Recovery QR code overlay and calls window.print()
+ */
+export function printPetQR(petId, petName) {
+  const currentDomain = window.location.origin + window.location.pathname;
+  const qrUrl = `${currentDomain}#/scan/${petId}`;
+
+  showModal({
+    title: "Print Smart Digital Collar ID",
+    bodyHtml: `
+      <div style="text-align:center; padding:1rem;">
+        <h4 style="color:var(--teal); font-weight:700;">PawTrace Digital Collar Attachment</h4>
+        <p style="font-size:0.85rem; color:var(--text-muted); margin:0.5rem 0 1.5rem;">
+          Attach this tag directly to your pet's collar harness.
+        </p>
+        <div style="background:#1f7a8c; padding:2rem; border-radius: var(--radius-md); display:inline-block; color:white;">
+          <h3 style="font-family:'Outfit', sans-serif; font-weight:800; font-size:1.4rem; margin-bottom: 1rem;">🐾 PAWTRACE</h3>
+          <div id="admin-qrcode-box" style="background:white; padding:1rem; border-radius:var(--radius-sm); display:inline-block;"></div>
+          <p style="font-size: 0.8rem; margin-top: 0.5rem; font-weight:700;">${petName}</p>
+          <p style="font-size: 0.75rem; margin-top: 0.5rem; font-weight:600; letter-spacing:1px;">SCAN TO REPORT SCANNER GPS LOCATIONS</p>
+        </div>
+      </div>
+    `,
+    confirmText: "Print Design Layout",
+    onConfirm: () => {
+      window.print();
+      return false;
+    }
+  });
+
+  const setupQR = () => {
+    const qrBox = document.getElementById('admin-qrcode-box');
+    if (!qrBox) return;
+    try {
+      new QRCode(qrBox, {
+        text: qrUrl,
+        width: 160,
+        height: 160,
+        colorDark: "#1f7a8c",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    } catch (err) {
+      console.error("Error generating QR code in Admin:", err);
+      qrBox.innerHTML = `<p style="color:red; font-size:0.8rem;">QR Generation Failed</p>`;
+    }
+  };
+
+  if (typeof QRCode === 'undefined') {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    script.onload = setupQR;
+    document.head.appendChild(script);
+  } else {
+    setupQR();
+  }
+}
+
 window.Admin = {
   showTab,
   updateOrderStatus,
   activatePetQR,
   makeUserAdmin,
+  demoteAdmin,
   toggleDoctorVerification,
-  toggleNgoApproval
+  toggleNgoApproval,
+  toggleProviderStatus,
+  moderateReport,
+  printPetQR
 };
