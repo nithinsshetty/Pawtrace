@@ -4,14 +4,13 @@ PawTrace is a responsive Single Page Application (SPA) designed to provide a dig
 
 The platform provides digital pet identity, QR-linked pet profiles, medical records, reminders, lost-pet recovery, caregiver access, veterinary services, NGO workflows, adoption functionality, marketplace features, notifications, community functionality, and AI-assisted pet support.
 
-The application uses a lightweight frontend architecture with Vanilla JavaScript ES Modules and a Node.js/Express backend.
+The application uses a lightweight frontend architecture with Vanilla JavaScript ES Modules and a Node.js/Express backend. **PawTrace is fully independent of Firebase — all authentication, database, storage, and backend services run entirely on Supabase.**
 
 ---
 
 # 🛠️ Technology Stack
 
 ## Frontend
-
 * HTML5
 * CSS3
 * Vanilla JavaScript
@@ -21,7 +20,6 @@ The application uses a lightweight frontend architecture with Vanilla JavaScript
 * Progressive Web App (PWA) support
 
 ## Backend
-
 * Node.js
 * Express.js
 * REST API
@@ -29,15 +27,15 @@ The application uses a lightweight frontend architecture with Vanilla JavaScript
 * dotenv
 * bcrypt
 
-## Database & Authentication
-
+## Database, Authentication & Storage
 * Supabase
 * PostgreSQL
 * Supabase Authentication
+* Supabase Storage (file uploads: pet photos, medical attachments, journal photos)
 * Supabase JavaScript Client
+* Row Level Security (RLS) on every table
 
 ## Other Libraries
-
 * Chart.js
 * QRCode.js
 * Leaflet.js
@@ -70,7 +68,7 @@ The application uses a lightweight frontend architecture with Vanilla JavaScript
 
 # 📂 Project Structure
 
-```text
+```
 PawTrace/
 │
 ├── backend/
@@ -79,6 +77,9 @@ PawTrace/
 │   ├── package-lock.json
 │   ├── server.js
 │   └── supabase-admin.js
+│
+├── database/
+│   └── schema.sql
 │
 ├── assets/
 │
@@ -127,9 +128,9 @@ Before running PawTrace locally, install:
 1. Node.js
 2. npm
 3. A modern web browser
+4. A free Supabase account (https://supabase.com)
 
-Verify the installation:
-
+Verify installation:
 ```bash
 node --version
 npm --version
@@ -140,80 +141,65 @@ npm --version
 # 🚀 LOCAL INSTALLATION
 
 ## Step 1 — Extract the ZIP
-
 Extract `PawTrace.zip` to any location and open the extracted `PawTrace` folder.
 
----
+## Step 2 — Create a Supabase Project
+1. Go to https://supabase.com and create a new project.
+2. Wait for provisioning to finish.
+3. Go to **Project Settings → API Keys** and copy:
+   - Project URL
+   - Publishable (anon) key
+   - Secret (service_role) key — **keep this private, backend only**
 
-## Step 2 — Configure Supabase
+## Step 3 — Set Up the Database Schema
+This step is required — the database is empty by default and the app will not function without it.
 
-PawTrace uses Supabase for authentication and database functionality.
+1. Open your Supabase project → **SQL Editor**.
+2. Open `database/schema.sql` from this ZIP.
+3. Paste the entire contents into the SQL Editor and click **Run**.
+4. Confirm it completes with no errors. This creates all tables (users, pets, medical_records, reminders, journal_entries, orders, notifications, vet_access, appointments, service_providers, service_bookings, rescued_animals, adoption_applications, community_posts, and others) along with their Row Level Security policies.
 
-The frontend configuration is located in:
+## Step 4 — Create Storage Buckets
+In your Supabase project → **Storage**, create these three buckets:
 
-```text
-supabase-config.js
+| Bucket name | Public |
+|---|---|
+| `pet-photos` | Yes |
+| `journal-photos` | Yes |
+| `medical-attachments` | No |
+
+After creating them, go back to the SQL Editor and run the storage policy statements included at the bottom of `database/schema.sql` (they are labeled clearly in the file) — these control who can upload/view files in each bucket.
+
+## Step 5 — Configure the Frontend
+Open `supabase-config.js` in the project root and set:
+```javascript
+const supabaseUrl = "YOUR_SUPABASE_PROJECT_URL";
+const supabaseAnonKey = "YOUR_SUPABASE_PUBLISHABLE_KEY";
 ```
 
-If the ZIP already contains the correct Supabase URL and publishable/anon key, no changes are required.
-
----
-
-# 🔐 Backend Environment Variables
-
-Create:
-
-```text
-backend/.env
-```
-
-Add:
-
+## Step 6 — Configure Backend Environment Variables
+Create `backend/.env`:
 ```env
 SUPABASE_URL=YOUR_SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
 PORT=5000
 ```
+The service-role key must remain private and must only be used by the backend — never place it in any frontend file.
 
-The Supabase service-role key must remain private and must only be used by the backend.
-
----
-
-# Step 3 — Install Backend Dependencies
-
-Open a terminal in the PawTrace directory:
-
+## Step 7 — Install Backend Dependencies
 ```bash
 cd backend
 npm install
 ```
 
----
-
-# Step 4 — Start the Backend
-
+## Step 8 — Start the Backend
 ```bash
 npm start
 ```
+Runs at: `http://localhost:5000`
 
-The backend will run at:
-
-```text
-http://localhost:5000
-```
-
----
-
-# Step 5 — Test the Backend
-
-Open:
-
-```text
-http://localhost:5000/api/health
-```
-
-A successful response should look similar to:
-
+## Step 9 — Test the Backend
+Open `http://localhost:5000/api/health` in your browser. Expected response:
 ```json
 {
   "status": "healthy",
@@ -221,300 +207,155 @@ A successful response should look similar to:
 }
 ```
 
----
-
-# Step 6 — Start the Frontend
-
-Keep the backend terminal running and open a second terminal.
-
-Return to the PawTrace root directory:
-
+## Step 10 — Start the Frontend
+Keep the backend terminal running, open a second terminal, and return to the project root:
 ```bash
 cd ..
 ```
+Do not open `index.html` directly via `file://` — ES module imports require a real HTTP server.
 
-Do not open `index.html` directly using `file://`.
-
-Use a local HTTP server.
-
-## Option A — Python
-
+**Option A — Python:**
 ```bash
 python -m http.server 8080
 ```
-
-Open:
-
-```text
-http://localhost:8080
-```
-
-## Option B — Node.js
-
+**Option B — Node.js:**
 ```bash
 npx http-server . -p 8080
 ```
+**Option C — VS Code Live Server:** open the folder in VS Code and click "Go Live."
 
-Open:
-
-```text
-http://localhost:8080
-```
-
-## Option C — VS Code Live Server
-
-Open the PawTrace folder in VS Code and select **Go Live**.
+Open `http://localhost:8080`.
 
 ---
 
-# 🖥️ Running the Complete Application
+# 🖥️ Running the Complete Application (Summary)
 
-Two terminals are required.
-
-### Terminal 1 — Backend
-
+**Terminal 1 — Backend:**
 ```bash
 cd PawTrace/backend
 npm install
 npm start
 ```
+→ `http://localhost:5000`
 
-Backend:
-
-```text
-http://localhost:5000
-```
-
-### Terminal 2 — Frontend
-
+**Terminal 2 — Frontend:**
 ```bash
 cd PawTrace
 python -m http.server 8080
 ```
+→ `http://localhost:8080`
 
-Frontend:
+---
 
-```text
-http://localhost:8080
+# 🔐 Creating a Test Admin Account
+
+There is no separate admin signup form. To get admin access for testing:
+
+1. Sign up normally through the app as a regular user.
+2. In Supabase → SQL Editor, run:
+```sql
+update public.users set role = 'admin' where email = 'YOUR_TEST_EMAIL_HERE';
 ```
+3. Log out and log back in — the account now has full Admin Portal access.
+
+To test the Vet or NGO portals, sign up using the role selector on the signup screen and choose "Veterinarian" or "NGO Rescue" — these accounts start in a pending-verification state and must be approved via the Admin Portal (Vet Verification / NGO Approval tabs) before their full portal unlocks.
 
 ---
 
 # 🔌 API Configuration
 
-The frontend API configuration is located in:
-
-```text
-api-config.js
-```
-
-During local development, the application uses:
-
-```text
-http://localhost:5000
-```
-
-Make sure the backend is running on port `5000`.
+Frontend API base URL is set in `api-config.js`. During local development this should point to `http://localhost:5000`. Ensure the backend is running on port `5000` before testing frontend features that call it (AI chatbot).
 
 ---
 
 # 🤖 AI Chatbot Backend
 
-The chatbot backend is located in:
+Located in `backend/chatbot-routes.js`, registered under `/api/chatbot`, main server in `backend/server.js`. The chatbot route authenticates using Supabase JWTs (not Firebase tokens) — confirm this route verifies the token via `supabaseAdmin.auth.getUser()` before testing; if chat messages don't get replies, this is the first place to check.
 
-```text
-backend/chatbot-routes.js
-```
-
-The chatbot API is registered under:
-
-```text
-/api/chatbot
-```
-
-The main backend server is:
-
-```text
-backend/server.js
-```
-
-Health endpoint:
-
-```text
-GET /api/health
-```
+Health endpoint: `GET /api/health`
 
 ---
 
 # 🔐 Authentication
 
-PawTrace uses Supabase Authentication.
-
-Authentication logic:
-
-```text
-auth.js
-```
-
-Application roles include:
-
-* Pet Owner / Customer
-* Veterinarian
-* NGO
-* Administrator
+PawTrace uses Supabase Authentication exclusively. Core logic lives in `auth.js`. Application roles: Pet Owner/Customer, Veterinarian, NGO, Service Provider, Administrator.
 
 ---
 
-# 🗄️ Database
+# 🗄️ Database & Storage
 
-PawTrace uses:
-
-```text
-Supabase PostgreSQL
-```
-
-Frontend Supabase client:
-
-```text
-supabase-config.js
-```
-
-Backend Supabase client:
-
-```text
-backend/supabase-admin.js
-```
-
-Database security should be enforced through appropriate Supabase Row Level Security (RLS) policies.
+- Database: Supabase PostgreSQL, schema in `database/schema.sql`
+- Frontend Supabase client: `supabase-config.js`
+- Backend Supabase client: `backend/supabase-admin.js`
+- File storage: Supabase Storage, three buckets as described in Step 4
+- All tables are protected with Row Level Security — do not disable RLS on any table.
 
 ---
 
 # 📱 Progressive Web App
 
-PawTrace includes PWA functionality through:
-
-```text
-manifest.json
-sw.js
-```
-
-The service worker manages application caching and offline resources.
+PWA functionality via `manifest.json` and `sw.js`. The service worker manages caching and offline resources.
 
 ---
 
 # 🌐 SEO
 
-PawTrace includes:
-
-```text
-robots.txt
-sitemap.xml
-```
-
-These files support search engine crawling and SEO.
+`robots.txt` and `sitemap.xml` support search engine crawling.
 
 ---
 
 # 🧪 Local Testing Checklist
 
-After starting both servers, test:
-
-* User registration
-* User login
-* Logout
+* User registration (owner, vet, NGO, service provider)
+* Login / logout
 * Dashboard
-* Pet creation
-* Pet profile
-* QR functionality
-* Medical records
+* Pet creation with photo upload
+* Pet profile (all tabs: Profile, Medical, Reminders, Journal)
+* QR scan flow (open `#/scan/{petId}` in an incognito window)
+* Medical records with file attachment
 * Reminders
-* Caregiver functionality
-* Veterinary functionality
-* NGO functionality
-* Adoption functionality
-* Marketplace functionality
-* Services
-* Notifications
-* Community functionality
-* Admin functionality
-* AI/chatbot functionality
-* Responsive/mobile interface
-* PWA functionality
+* Caregiver link generation and anonymous access
+* Vet portal: appointments, accept/reject, medical logging
+* NGO portal: intake, fosters, volunteers, adoption applications, stray reports
+* Adoption center browsing and applications
+* Marketplace listings
+* Service booking (owner + provider sides)
+* Notifications (real-time)
+* Community posts, likes, comments
+* Admin portal (all 8 tabs)
+* AI chatbot reply
+* Responsive/mobile layout
+* PWA install prompt
 
 ---
 
 # 🐛 Troubleshooting
 
-## Frontend does not load
+**Frontend does not load** — use `http://localhost:8080`, never open `index.html` via `file://`.
 
-Use:
+**API requests fail** — confirm backend is running (`cd backend && npm start`), then check `http://localhost:5000/api/health`.
 
-```text
-http://localhost:8080
-```
+**Supabase authentication fails** — check `supabase-config.js` for correct URL and publishable key.
 
-Do not open:
+**Signup succeeds but role/profile data is missing** — confirm `database/schema.sql` ran successfully, specifically the `handle_new_user()` trigger.
 
-```text
-file:///C:/.../index.html
-```
+**File uploads fail** — confirm the three Storage buckets exist with correct public/private settings and their policies were applied (Step 4).
 
-## API requests fail
+**AI chatbot doesn't reply** — confirm the backend is running and that `chatbot-routes.js` verifies Supabase JWTs, not Firebase tokens.
 
-Make sure the backend is running:
-
-```bash
-cd backend
-npm start
-```
-
-Then check:
-
-```text
-http://localhost:5000/api/health
-```
-
-## Supabase authentication fails
-
-Check:
-
-```text
-supabase-config.js
-```
-
-Verify the Supabase URL and publishable/anon key.
-
-## Backend reports missing environment variables
-
-Make sure:
-
-```text
-backend/.env
-```
-
-contains:
-
-```env
-SUPABASE_URL=YOUR_SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
-PORT=5000
-```
-
-Restart the backend after changing `.env`.
+**Backend reports missing environment variables** — confirm `backend/.env` contains `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `PORT=5000`, then restart the backend.
 
 ---
 
 # 📦 ZIP Distribution
 
-The ZIP should contain the source code and required project files.
+Include: all source files, `database/schema.sql`, this README.
 
 Do not include:
-
-```text
+```
 node_modules/
 backend/node_modules/
 backend/.env
-serviceAccountKey.json
 .git/
 .agents/
 scratch/
@@ -524,45 +365,24 @@ old test files
 unused JSON data files
 ```
 
-Install backend dependencies after extraction:
-
-```bash
-cd backend
-npm install
-```
+Install backend dependencies after extraction: `cd backend && npm install`
 
 ---
 
 # 🔑 Required Credentials
 
-### Frontend
-
-```text
-Supabase Project URL
-Supabase Publishable/Anon Key
-```
-
-### Backend
-
-```text
-Supabase Project URL
-Supabase Service Role Key
-```
-
-The service-role key must remain private and should be provided separately to authorized testers if required.
+**Frontend:** Supabase Project URL, Supabase Publishable/Anon Key
+**Backend:** Supabase Project URL, Supabase Service Role Key (private — provide separately to authorized testers, never in the ZIP)
 
 ---
 
 # 🏗️ Application Architecture
 
-PawTrace follows a lightweight SPA + REST backend architecture.
-
-```text
+```
 Browser
    │
    ├── Vanilla JavaScript SPA
-   │
-   ├── Supabase Client
+   ├── Supabase Client (Auth, Database, Storage, Realtime)
    │
    └── REST API
           │
@@ -573,86 +393,8 @@ Browser
       Supabase
           │
           ├── Authentication
-          └── PostgreSQL
-```
-
----
-
-# 🧹 Legacy Firebase
-
-The original version of PawTrace was developed using Firebase.
-
-The current architecture uses:
-
-```text
-Supabase Authentication
-        +
-Supabase PostgreSQL
-        +
-Supabase JavaScript Client
-        +
-Node.js / Express Backend
-```
-
-The current application does not require Firebase for its active authentication, database, or backend functionality.
-
----
-
-# 📌 Quick Start
-
-### 1. Extract ZIP
-
-```text
-Extract PawTrace.zip
-```
-
-### 2. Create backend environment file
-
-```text
-backend/.env
-```
-
-```env
-SUPABASE_URL=YOUR_SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
-PORT=5000
-```
-
-### 3. Install backend
-
-```bash
-cd backend
-npm install
-```
-
-### 4. Start backend
-
-```bash
-npm start
-```
-
-Backend:
-
-```text
-http://localhost:5000
-```
-
-### 5. Open a second terminal
-
-```bash
-cd ..
-```
-
-### 6. Start frontend
-
-```bash
-python -m http.server 8080
-```
-
-### 7. Open PawTrace
-
-```text
-http://localhost:8080
+          ├── PostgreSQL (with Row Level Security)
+          └── Storage
 ```
 
 ---
@@ -665,7 +407,8 @@ http://localhost:8080
 **Backend:** Node.js + Express
 **Database:** Supabase PostgreSQL
 **Authentication:** Supabase Authentication
+**Storage:** Supabase Storage
 **API:** REST
 **PWA:** Service Worker + Web App Manifest
 
-The application does not depend on Firebase for its active application functionality.
+This application is fully independent of Firebase — no Firebase services are used anywhere in authentication, database, storage, hosting, or backend functionality.
