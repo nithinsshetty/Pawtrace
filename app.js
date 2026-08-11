@@ -25,7 +25,6 @@ import { renderProfile, renderSettings } from './settings.js';
 import { renderAdminDashboard, renderAdminLogin, ADMIN_EMAILS } from './admin.js';
 import { renderOrders } from './orders.js';
 import { renderAdoptionCenter } from './adoptions-client.js';
-import { renderPortfolio } from './portfolio.js';
 import { renderServices } from './services.js';
 import { renderServicePortal } from './service-portal.js';
 import { renderMarketplace, renderCreateListing } from './listings.js';
@@ -114,7 +113,6 @@ function setupRoutes() {
   Router.add('/admin', renderAdminDashboard, true);
   Router.add('/orders', renderOrders, true);
   Router.add('/adoption-center', renderAdoptionCenter, false);
-  Router.add('/portfolio', renderPortfolio, false);
   Router.add('/services', renderServices, true);
   Router.add('/service-portal', renderServicePortal, true);
   Router.add('/marketplace', renderMarketplace, true);
@@ -155,7 +153,7 @@ async function handleAuthStateChange(user, isReady) {
     await updateSidebarForRole(portalContext, user, role);
 
     const hash = window.location.hash || '#/dashboard';
-    const isFullWidthPage = ['#/login', '#/signup', '#/admin/login', '#/portfolio'].includes(hash) || hash.startsWith('#/scan/') || hash.startsWith('#/caregiver/');
+    const isFullWidthPage = ['#/login', '#/signup', '#/admin/login'].includes(hash) || hash.startsWith('#/scan/') || hash.startsWith('#/caregiver/');
 
     if (isFullWidthPage) {
       sidebar.classList.add('hidden');
@@ -359,7 +357,7 @@ function setupGlobalDOMEvents() {
       await updateSidebarForRole(portalContext, user, role);
 
       const hash = window.location.hash || '#/dashboard';
-      const isFullWidthPage = ['#/login', '#/signup', '#/admin/login', '#/portfolio'].includes(hash) || hash.startsWith('#/scan/') || hash.startsWith('#/caregiver/');
+      const isFullWidthPage = ['#/login', '#/signup', '#/admin/login'].includes(hash) || hash.startsWith('#/scan/') || hash.startsWith('#/caregiver/');
 
       const mobileNav = document.getElementById('mobile-nav');
       const container = document.getElementById('app-container');
