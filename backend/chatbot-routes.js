@@ -1,8 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('./firebase-admin');
-const { getAuth } = require('firebase-admin/auth');
-const { FieldValue } = require('firebase-admin/firestore');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
 
@@ -83,80 +86,145 @@ const tools = [
 ];
 
 async function getPetReminder(petName, ownerUid) {
-  const petsSnapshot = await db.collection('pets')
-    .where('name', '==', petName)
-    .where('ownerId', '==', ownerUid)
+  const { data: pet, error: petError } = await supabase
+    .from('pets')
+    .select('id, name')
+    .eq('name', petName)
+    .eq('owner_id', ownerUid)
     .limit(1)
-    .get();
+    .maybeSingle();
 
-  if (petsSnapshot.empty) {
-    return { error: `No pet named "${petName}" was found in your account.` };
+  if (petError) {
+    console.error('Error finding pet:', petError);
+    return { error: 'Failed to find the pet.' };
   }
 
-  const petDoc = petsSnapshot.docs[0];
-
-  const remindersSnapshot = await petDoc.ref.collection('reminders')
-    .orderBy('dueDate', 'asc')
-    .limit(1)
-    .get();
-
-  if (remindersSnapshot.empty) {
-    return { petName, reminder: 'No upcoming reminders found.' };
+  if (!pet) {
+    return {
+      error: `No pet named "${petName}" was found in your account.`
+    };
   }
 
-  const reminder = remindersSnapshot.docs[0].data();
-  return { petName, ...reminder };
+  const { data: reminder, error: reminderError } = await supabase
+    .from('reminders')
+    .select('*')
+    .eq('pet_id', pet.id)
+    .eq('is_completed', false)
+    .order('reminder_date', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (reminderError) {
+    console.error('Error finding reminder:', reminderError);
+    return { error: 'Failed to retrieve reminders.' };
+  }
+
+  if (!reminder) {
+    return {
+      petName,
+      reminder: 'No upcoming reminders found.'
+    };
+  }
+
+  return {
+    petName,
+    reminder
+  };
 }
+
 
 async function getMedicalRecords(petName, ownerUid) {
-  const petsSnapshot = await db.collection('pets')
-    .where('name', '==', petName)
-    .where('ownerId', '==', ownerUid)
+  const { data: pet, error: petError } = await supabase
+    .from('pets')
+    .select('id, name')
+    .eq('name', petName)
+    .eq('owner_id', ownerUid)
     .limit(1)
-    .get();
+    .maybeSingle();
 
-  if (petsSnapshot.empty) {
-    return { error: `No pet named "${petName}" was found in your account.` };
+  if (petError) {
+    console.error('Error finding pet:', petError);
+    return { error: 'Failed to find the pet.' };
   }
 
-  const petDoc = petsSnapshot.docs[0];
-
-  const recordsSnapshot = await petDoc.ref.collection('medical_records')
-    .orderBy('date', 'desc')
-    .limit(5)
-    .get();
-
-  if (recordsSnapshot.empty) {
-    return { petName, records: 'No medical records found.' };
+  if (!pet) {
+    return {
+      error: `No pet named "${petName}" was found in your account.`
+    };
   }
 
-  const records = recordsSnapshot.docs.map(doc => doc.data());
-  return { petName, records };
+  const { data: records, error: recordsError } = await supabase
+    .from('medical_records')
+    .select('*')
+    .eq('pet_id', pet.id)
+    .order('visit_date', { ascending: false })
+    .limit(5);
+
+  if (recordsError) {
+    console.error('Error retrieving medical records:', recordsError);
+    return { error: 'Failed to retrieve medical records.' };
+  }
+
+  if (!records || records.length === 0) {
+    return {
+      petName,
+      records: 'No medical records found.'
+    };
+  }
+
+  return {
+    petName,
+    records
+  };
 }
 
-async function createReminder(petName, ownerUid, reminderTitle, reminderType, dueDate) {
-  const petsSnapshot = await db.collection('pets')
-    .where('name', '==', petName)
-    .where('ownerId', '==', ownerUid)
-    .limit(1)
-    .get();
 
-  if (petsSnapshot.empty) {
-    return { error: `No pet named "${petName}" was found in your account. Reminder not created.` };
+async function createReminder(
+  petName,
+  ownerUid,
+  reminderTitle,
+  reminderType,
+  dueDate
+) {
+  const { data: pet, error: petError } = await supabase
+    .from('pets')
+    .select('id, name')
+    .eq('name', petName)
+    .eq('owner_id', ownerUid)
+    .limit(1)
+    .maybeSingle();
+
+  if (petError) {
+    console.error('Error finding pet:', petError);
+    return {
+      error: 'Failed to find the pet.'
+    };
   }
 
-  const petDoc = petsSnapshot.docs[0];
+  if (!pet) {
+    return {
+      error: `No pet named "${petName}" was found in your account. Reminder not created.`
+    };
+  }
 
-  const newReminder = {
-    title: reminderTitle,
-    type: reminderType,
-    dueDate: dueDate,
-    dueTime: '',
-    completed: false,
-    createdAt: FieldValue.serverTimestamp()
-  };
+  const { error: reminderError } = await supabase
+    .from('reminders')
+    .insert({
+      pet_id: pet.id,
+      title: reminderTitle,
+      description: null,
+      reminder_date: dueDate,
+      reminder_type: reminderType,
+      is_completed: false,
+      due_time: null
+    });
 
-  await petDoc.ref.collection('reminders').add(newReminder);
+  if (reminderError) {
+    console.error('Error creating reminder:', reminderError);
+    return {
+      error: 'Failed to create the reminder.'
+    };
+  }
 
   return {
     success: true,
@@ -166,6 +234,7 @@ async function createReminder(petName, ownerUid, reminderTitle, reminderType, du
     dueDate
   };
 }
+
 
 const faqEntries = [
   {
@@ -222,14 +291,27 @@ router.post('/chat', async (req, res) => {
     return res.status(401).json({ error: 'No authentication token provided.' });
   }
 
-  const idToken = authHeader.split('Bearer ')[1];
-  let uid;
-  try {
-    const decodedToken = await getAuth().verifyIdToken(idToken);
-    uid = decodedToken.uid;
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token.' });
+  const accessToken = authHeader.split('Bearer ')[1];
+
+let uid;
+
+try {
+  const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+
+  if (error || !user) {
+    return res.status(401).json({
+      error: 'Invalid or expired token.'
+    });
   }
+
+  uid = user.id;
+} catch (err) {
+  console.error('Supabase authentication error:', err);
+
+  return res.status(401).json({
+    error: 'Invalid or expired token.'
+  });
+}
 
   const { message } = req.body;
 

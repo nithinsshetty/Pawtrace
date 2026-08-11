@@ -280,30 +280,7 @@ export function calculateAge(dobString) {
 /**
  * Helper to display warning check if database cannot connect
  */
-export function checkFirebaseSetup() {
-  if (!isFirebaseConfigured) {
-    showModal({
-      title: "Firebase Configuration Required",
-      bodyHtml: `
-        <div style="text-align: center; padding: 1rem 0;">
-          <i class="fa-solid fa-triangle-exclamation" style="font-size: 3.5rem; color: var(--accent-yellow); margin-bottom: 1.5rem;"></i>
-          <p style="margin-bottom: 1rem; line-height: 1.5;">
-            PawTrace needs database configuration parameters to access authentication, pet records, and scanner geolocation logs.
-          </p>
-          <p style="font-size: 0.85rem; color: var(--text-muted); background: var(--bg-input); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-input);">
-            Please edit <code>firebase-config.js</code> inside your project directory and add your Firebase credentials.
-          </p>
-        </div>
-      `,
-      confirmText: "I understand",
-      onConfirm: () => {
-        closeModal();
-      }
-    });
-    return false;
-  }
-  return true;
-}
+
 /**
  * Upload a file to Supabase Storage. Path must start with the user's own
  * UID as the first folder segment (required by storage RLS policies).
