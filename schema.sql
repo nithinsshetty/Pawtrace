@@ -1,0 +1,637 @@
+-- ============================================================
+-- PAWTRACE — FULL SUPABASE SCHEMA
+-- Run this entire file in Supabase SQL Editor on a fresh project.
+-- ============================================================
+
+-- ============================================================
+-- 1. USERS
+-- ============================================================
+create table public.users (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null,
+  display_name text,
+  role text not null default 'customer',
+  photo_url text,
+  created_at timestamptz not null default now(),
+  vet_details jsonb default '{}'::jsonb,
+  ngo_details jsonb default '{}'::jsonb,
+  adoption_favorites uuid[] default '{}'
+);
+alter table public.users enable row level security;
+
+create policy "Users can view own profile" on public.users for select using (auth.uid() = id);
+create policy "Users can update own profile" on public.users for update
+  using (auth.uid() = id)
+  with check (auth.uid() = id and role = (select role from public.users where id = auth.uid()));
+create policy "Users can insert own profile" on public.users for insert with check (auth.uid() = id);
+
+-- ============================================================
+-- 2. is_admin() HELPER FUNCTION (used across most tables)
+-- ============================================================
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.users where id = auth.uid() and role = 'admin');
+$$;
+
+create policy "Admins can view all users" on public.users for select using (is_admin());
+create policy "Admins can update any user" on public.users for update using (is_admin()) with check (is_admin());
+create policy "Authenticated users can view vet and ngo directory" on public.users for select
+  to authenticated using (role in ('vet', 'ngo'));
+
+-- ============================================================
+-- 3. AUTO-CREATE PROFILE ON SIGNUP
+-- ============================================================
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.users (id, email, display_name, role)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1)),
+    coalesce(new.raw_user_meta_data->>'role', 'customer')
+  );
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+after insert on auth.users
+for each row execute function public.handle_new_user();
+
+-- ============================================================
+-- 4. PETS
+-- ============================================================
+create table public.pets (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.users(id) on delete cascade,
+  name text not null,
+  species text,
+  breed text,
+  date_of_birth date,
+  photo_url text,
+  qr_code_id text unique not null default gen_random_uuid()::text,
+  is_lost boolean not null default false,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  gender text,
+  weight numeric,
+  vaccination_status text default 'Unknown',
+  is_draft boolean not null default false,
+  pawtrace_id text unique,
+  size text,
+  indoor_outdoor text,
+  neutered text,
+  microchip_id text,
+  adoption_source text,
+  registration_date date,
+  adoption_date date,
+  owner_name text,
+  owner_phone text,
+  emergency_contact_name text,
+  emergency_contact text,
+  relationship text,
+  address text,
+  city text,
+  state text,
+  postal_code text,
+  blood_type text,
+  insurance text,
+  allergies text,
+  conditions text,
+  medications text,
+  medical_notes text,
+  diet_type text,
+  feeding_schedule text,
+  activity_level text,
+  treats text,
+  behavior_notes text,
+  training_details text,
+  additional_photos text[] default '{}',
+  recovery_contact text,
+  recovery_instructions text,
+  reward_amount text,
+  privacy jsonb default '{}'::jsonb,
+  owner_contact text,
+  has_tag boolean not null default false,
+  tag_activated_at timestamptz
+);
+alter table public.pets enable row level security;
+
+create policy "Users can view own pets" on public.pets for select using (auth.uid() = owner_id);
+create policy "Users can insert own pets" on public.pets for insert with check (auth.uid() = owner_id);
+create policy "Users can update own pets" on public.pets for update using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+create policy "Users can delete own pets" on public.pets for delete using (auth.uid() = owner_id);
+create policy "Anyone can view lost pet basic info via QR" on public.pets for select to anon using (true);
+create policy "Anyone can view lost pets" on public.pets for select using (is_lost = true);
+create policy "Admins can view all pets" on public.pets for select to authenticated using (is_admin());
+create policy "Admins can update all pets" on public.pets for update to authenticated using (is_admin()) with check (is_admin());
+
+-- ============================================================
+-- 5. PET OWNER CONTACT (separate from pets for QR privacy)
+-- ============================================================
+create table public.pet_owner_contact (
+  pet_id uuid primary key references public.pets(id) on delete cascade,
+  phone text,
+  address text,
+  show_address_on_scan boolean not null default false,
+  show_phone_on_scan boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.pet_owner_contact enable row level security;
+
+create policy "Owners manage own pet contact info" on public.pet_owner_contact for all
+  using (exists (select 1 from public.pets where pets.id = pet_owner_contact.pet_id and pets.owner_id = auth.uid()))
+  with check (exists (select 1 from public.pets where pets.id = pet_owner_contact.pet_id and pets.owner_id = auth.uid()));
+create policy "Anon can view contact info only if opted in" on public.pet_owner_contact for select
+  to anon using (show_phone_on_scan = true or show_address_on_scan = true);
+
+-- ============================================================
+-- 6. MEDICAL RECORDS
+-- ============================================================
+create table public.medical_records (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  veterinarian_id uuid references public.users(id),
+  title text not null,
+  description text,
+  record_type text not null,
+  visit_date date,
+  attachment_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  attachment_name text,
+  created_by uuid references public.users(id),
+  created_by_role text,
+  created_by_display_name text,
+  next_due date,
+  status text
+);
+alter table public.medical_records enable row level security;
+
+create policy "Owners can view medical records" on public.medical_records for select
+  using (exists (select 1 from public.pets where pets.id = medical_records.pet_id and pets.owner_id = auth.uid()));
+create policy "Owners can insert medical records" on public.medical_records for insert
+  with check (exists (select 1 from public.pets where pets.id = medical_records.pet_id and pets.owner_id = auth.uid()));
+create policy "Owners can update medical records" on public.medical_records for update
+  using (exists (select 1 from public.pets where pets.id = medical_records.pet_id and pets.owner_id = auth.uid()));
+create policy "Owners can delete medical records" on public.medical_records for delete
+  using (exists (select 1 from public.pets where pets.id = medical_records.pet_id and pets.owner_id = auth.uid()));
+create policy "Vets manage medical records for accessed pets" on public.medical_records for all
+  using (exists (select 1 from public.vet_access where vet_access.pet_id = medical_records.pet_id and vet_access.vet_id = auth.uid() and vet_access.status='active') or is_admin())
+  with check (exists (select 1 from public.vet_access where vet_access.pet_id = medical_records.pet_id and vet_access.vet_id = auth.uid() and vet_access.status='active') or is_admin());
+
+-- ============================================================
+-- 7. REMINDERS
+-- ============================================================
+create table public.reminders (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  title text not null,
+  description text,
+  reminder_date timestamptz not null,
+  reminder_type text not null,
+  is_completed boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  due_time text
+);
+alter table public.reminders enable row level security;
+
+create policy "Owners can view reminders" on public.reminders for select
+  using (exists (select 1 from public.pets where pets.id = reminders.pet_id and pets.owner_id = auth.uid()));
+create policy "Owners can insert reminders" on public.reminders for insert
+  with check (exists (select 1 from public.pets where pets.id = reminders.pet_id and pets.owner_id = auth.uid()));
+create policy "Owners can update reminders" on public.reminders for update
+  using (exists (select 1 from public.pets where pets.id = reminders.pet_id and pets.owner_id = auth.uid()));
+create policy "Owners can delete reminders" on public.reminders for delete
+  using (exists (select 1 from public.pets where pets.id = reminders.pet_id and pets.owner_id = auth.uid()));
+create policy "Vets manage reminders for accessed pets" on public.reminders for all
+  using (exists (select 1 from public.vet_access where vet_access.pet_id = reminders.pet_id and vet_access.vet_id = auth.uid() and vet_access.status='active') or is_admin())
+  with check (exists (select 1 from public.vet_access where vet_access.pet_id = reminders.pet_id and vet_access.vet_id = auth.uid() and vet_access.status='active') or is_admin());
+
+-- ============================================================
+-- 8. NOTIFICATIONS
+-- ============================================================
+create table public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  type text not null,
+  message text not null,
+  maps_link text,
+  is_read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table public.notifications enable row level security;
+
+create policy "Users can view own notifications" on public.notifications for select using (auth.uid() = user_id);
+create policy "Users can update own notifications" on public.notifications for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users can delete own notifications" on public.notifications for delete using (auth.uid() = user_id);
+create policy "Authenticated users can insert notifications" on public.notifications for insert to authenticated with check (true);
+create policy "Anonymous can insert scan notifications" on public.notifications for insert to anon with check (type = 'QR_SCAN');
+
+-- ============================================================
+-- 9. JOURNAL ENTRIES
+-- ============================================================
+create table public.journal_entries (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  entry_date date not null,
+  weight numeric,
+  notes text,
+  photo_url text,
+  created_at timestamptz not null default now()
+);
+alter table public.journal_entries enable row level security;
+
+create policy "Owners manage own pet journal entries" on public.journal_entries for all
+  using (exists (select 1 from public.pets where pets.id = journal_entries.pet_id and pets.owner_id = auth.uid()))
+  with check (exists (select 1 from public.pets where pets.id = journal_entries.pet_id and pets.owner_id = auth.uid()));
+
+-- ============================================================
+-- 10. SCANS (GPS pings from QR scans)
+-- ============================================================
+create table public.scans (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  latitude numeric,
+  longitude numeric,
+  maps_link text,
+  created_at timestamptz not null default now()
+);
+alter table public.scans enable row level security;
+
+create policy "Owners view scans of own pets" on public.scans for select
+  using (exists (select 1 from public.pets where pets.id = scans.pet_id and pets.owner_id = auth.uid()));
+create policy "Anyone can insert a scan event" on public.scans for insert with check (true);
+
+-- ============================================================
+-- 11. ORDERS (Smart Tag pendant orders)
+-- ============================================================
+create table public.orders (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid references public.pets(id) on delete set null,
+  owner_id uuid not null references public.users(id) on delete cascade,
+  pet_name text,
+  owner_name text,
+  address text,
+  owner_phone text,
+  status text not null default 'Pending',
+  qr_activated boolean not null default false,
+  created_at timestamptz not null default now(),
+  confirmed_at timestamptz,
+  shipped_at timestamptz,
+  delivered_at timestamptz,
+  qr_activated_at timestamptz,
+  amount numeric default 299
+);
+alter table public.orders enable row level security;
+
+create policy "Owners view own orders" on public.orders for select using (auth.uid() = owner_id or is_admin());
+create policy "Owners insert own orders" on public.orders for insert with check (auth.uid() = owner_id);
+create policy "Admins update orders" on public.orders for update using (is_admin());
+
+-- Link pets to their tag order (deferred until orders exists, avoids circular dependency)
+alter table public.pets add column tag_order_id uuid references public.orders(id) on delete set null;
+
+-- ============================================================
+-- 12. CAREGIVER TOKENS
+-- ============================================================
+create table public.caregiver_tokens (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  owner_id uuid not null references public.users(id) on delete cascade,
+  active boolean not null default true,
+  expires_at timestamptz not null,
+  permissions jsonb not null default '{}'::jsonb,
+  pet_details jsonb not null default '{}'::jsonb,
+  medical_records jsonb not null default '[]'::jsonb,
+  reminders jsonb not null default '[]'::jsonb,
+  journal_entries jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+alter table public.caregiver_tokens enable row level security;
+
+create policy "Owners manage own caregiver tokens" on public.caregiver_tokens for all
+  using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+create policy "Anyone can view active caregiver tokens" on public.caregiver_tokens for select
+  to anon using (active = true and expires_at > now());
+create policy "Anyone can update active caregiver tokens" on public.caregiver_tokens for update
+  to anon using (active = true and expires_at > now()) with check (active = true and expires_at > now());
+
+-- ============================================================
+-- 13. VET ACCESS (owner-authorized vet sharing)
+-- ============================================================
+create table public.vet_access (
+  id uuid primary key default gen_random_uuid(),
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  owner_id uuid not null references public.users(id) on delete cascade,
+  vet_id uuid not null references public.users(id) on delete cascade,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  unique (pet_id, vet_id)
+);
+alter table public.vet_access enable row level security;
+
+create policy "Owners manage their vet access grants" on public.vet_access for all
+  using (auth.uid() = owner_id or is_admin()) with check (auth.uid() = owner_id or is_admin());
+create policy "Vets can view access granted to them" on public.vet_access for select using (auth.uid() = vet_id);
+create policy "Vets can create own access grants" on public.vet_access for insert to authenticated with check (auth.uid() = vet_id);
+
+-- Now that vet_access exists, pets can allow vet access
+create policy "Vets view accessed pets" on public.pets for select
+  using (exists (select 1 from public.vet_access where vet_access.pet_id = pets.id and vet_access.vet_id = auth.uid() and vet_access.status='active') or is_admin());
+
+-- ============================================================
+-- 14. APPOINTMENTS
+-- ============================================================
+create table public.appointments (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.users(id) on delete cascade,
+  pet_id uuid not null references public.pets(id) on delete cascade,
+  vet_id uuid references public.users(id) on delete set null,
+  vet_name text,
+  appointment_date date not null,
+  appointment_time text,
+  reason text,
+  status text not null default 'pending',
+  created_at timestamptz not null default now()
+);
+alter table public.appointments enable row level security;
+
+create policy "Owners manage own appointments" on public.appointments for all
+  using (auth.uid() = owner_id or is_admin()) with check (auth.uid() = owner_id or is_admin());
+create policy "Vets view their appointments" on public.appointments for select using (auth.uid() = vet_id);
+create policy "Vets update own appointments" on public.appointments for update using (auth.uid() = vet_id) with check (auth.uid() = vet_id);
+
+create policy "Vets can view pets from own appointments" on public.pets for select
+  using (exists (select 1 from public.appointments where appointments.pet_id = pets.id and appointments.vet_id = auth.uid()) or is_admin());
+
+-- ============================================================
+-- 15. SERVICE PROVIDERS
+-- ============================================================
+create table public.service_providers (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  provider_type text,
+  phone text,
+  location text,
+  rate numeric default 0,
+  id_proof_url text,
+  status text not null default 'pending',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.service_providers enable row level security;
+
+create policy "Providers manage own profile" on public.service_providers for all
+  using (auth.uid() = user_id or is_admin()) with check (auth.uid() = user_id or is_admin());
+create policy "Anyone can view approved providers" on public.service_providers for select using (status = 'approved');
+
+-- ============================================================
+-- 16. SERVICE BOOKINGS
+-- ============================================================
+create table public.service_bookings (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.users(id) on delete cascade,
+  provider_id uuid not null references public.users(id) on delete cascade,
+  pet_id uuid references public.pets(id) on delete set null,
+  service_type text,
+  booking_date date not null,
+  booking_time text,
+  notes text,
+  status text not null default 'pending',
+  created_at timestamptz default now()
+);
+alter table public.service_bookings enable row level security;
+
+create policy "Owners manage own bookings" on public.service_bookings for all
+  using (owner_id = auth.uid() or is_admin()) with check (owner_id = auth.uid() or is_admin());
+create policy "Providers view own bookings" on public.service_bookings for select using (provider_id = auth.uid());
+create policy "Providers update own bookings" on public.service_bookings for update using (provider_id = auth.uid()) with check (provider_id = auth.uid());
+
+-- ============================================================
+-- 17. REPORTS (moderation)
+-- ============================================================
+create table public.reports (
+  id uuid primary key default gen_random_uuid(),
+  target_type text not null,
+  target_id text not null,
+  reporter_user_id uuid references public.users(id) on delete set null,
+  reason text not null,
+  details text,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+alter table public.reports enable row level security;
+
+create policy "Admins manage reports" on public.reports for all using (is_admin()) with check (is_admin());
+create policy "Users can file reports" on public.reports for insert with check (auth.uid() = reporter_user_id);
+
+-- ============================================================
+-- 18. COMMUNITY POSTS & COMMENTS
+-- ============================================================
+create table public.community_posts (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.users(id) on delete cascade,
+  title text not null,
+  content text not null,
+  photo_url text,
+  category text not null default 'showcase',
+  likes uuid[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+alter table public.community_posts enable row level security;
+
+create policy "Anyone authenticated can view posts" on public.community_posts for select to authenticated using (true);
+create policy "Users create own posts" on public.community_posts for insert to authenticated with check (auth.uid() = author_id);
+create policy "Users update own posts (likes)" on public.community_posts for update to authenticated using (true) with check (true);
+
+create table public.community_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.community_posts(id) on delete cascade,
+  author_id uuid not null references public.users(id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.community_comments enable row level security;
+
+create policy "Anyone authenticated can view comments" on public.community_comments for select to authenticated using (true);
+create policy "Users create own comments" on public.community_comments for insert to authenticated with check (auth.uid() = author_id);
+
+-- ============================================================
+-- 19. RESCUED ANIMALS (NGO census + public adoption board)
+-- ============================================================
+create table public.rescued_animals (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references public.users(id) on delete cascade,
+  pet_name text not null,
+  species text, breed text, age text, gender text, size text,
+  description text, photo_url text,
+  vaccinated boolean default false, special_needs boolean default false,
+  good_with_children boolean default false, good_with_pets boolean default false,
+  status text not null default 'available',
+  assigned_qr_tag_id text, pawtrace_id text,
+  adopted_by_uid uuid references public.users(id),
+  pet_profile_id uuid references public.pets(id),
+  timeline jsonb default '[]'::jsonb,
+  created_at timestamptz default now(),
+  intake_status text not null default 'SHELTERED',
+  shelter_location text,
+  medical_notes text,
+  org_name text
+);
+alter table public.rescued_animals enable row level security;
+
+create policy "Anyone can view available animals" on public.rescued_animals for select
+  to authenticated using (status = 'available' or org_id = auth.uid() or is_admin());
+create policy "Org manages own animals" on public.rescued_animals for all
+  using (org_id = auth.uid() or is_admin()) with check (org_id = auth.uid() or is_admin());
+
+-- ============================================================
+-- 20. ADOPTION APPLICATIONS
+-- ============================================================
+create table public.adoption_applications (
+  id uuid primary key default gen_random_uuid(),
+  animal_id uuid not null references public.rescued_animals(id) on delete cascade,
+  applicant_uid uuid not null references public.users(id) on delete cascade,
+  applicant_name text, applicant_phone text, applicant_city text,
+  housing_type text, existing_pets text, experience text, reason text,
+  status text not null default 'PENDING',
+  home_check_status text default 'PENDING',
+  resolution_notes text,
+  ngo_notes jsonb default '[]'::jsonb,
+  org_id uuid references public.users(id),
+  created_at timestamptz default now()
+);
+alter table public.adoption_applications enable row level security;
+
+create policy "Applicants manage own applications" on public.adoption_applications for all
+  using (applicant_uid = auth.uid() or org_id = auth.uid() or is_admin())
+  with check (applicant_uid = auth.uid() or org_id = auth.uid() or is_admin());
+create policy "NGOs update own applications" on public.adoption_applications for update
+  using (org_id = auth.uid() or applicant_uid = auth.uid() or is_admin());
+
+-- ============================================================
+-- 21. PET LISTINGS (marketplace)
+-- ============================================================
+create table public.pet_listings (
+  id uuid primary key default gen_random_uuid(),
+  seller_user_id uuid not null references public.users(id) on delete cascade,
+  pet_id uuid references public.pets(id) on delete set null,
+  name text, breed text, age text, gender text,
+  price numeric not null default 0,
+  description text,
+  photos text[] default '{}',
+  status text not null default 'available',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+alter table public.pet_listings enable row level security;
+
+create policy "Anyone authenticated can view listings" on public.pet_listings for select to authenticated using (true);
+create policy "Sellers manage own listings" on public.pet_listings for all
+  using (seller_user_id = auth.uid() or is_admin()) with check (seller_user_id = auth.uid() or is_admin());
+
+-- ============================================================
+-- 22. NGO FOSTERS
+-- ============================================================
+create table public.ngo_fosters (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references public.users(id) on delete cascade,
+  name text not null, phone text, email text, address text,
+  max_capacity int not null default 1,
+  availability_status text not null default 'AVAILABLE',
+  current_placements uuid[] not null default '{}',
+  created_at timestamptz default now()
+);
+alter table public.ngo_fosters enable row level security;
+create policy "Org manages own fosters" on public.ngo_fosters for all
+  using (org_id = auth.uid() or is_admin()) with check (org_id = auth.uid() or is_admin());
+
+-- ============================================================
+-- 23. NGO VOLUNTEERS
+-- ============================================================
+create table public.ngo_volunteers (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references public.users(id) on delete cascade,
+  name text not null, phone text,
+  availability_schedule text, skills text[] default '{}',
+  active_mission_id text,
+  created_at timestamptz default now()
+);
+alter table public.ngo_volunteers enable row level security;
+create policy "Org manages own volunteers" on public.ngo_volunteers for all
+  using (org_id = auth.uid() or is_admin()) with check (org_id = auth.uid() or is_admin());
+
+-- ============================================================
+-- 24. NGO MEDICAL LOGS (for rescued animals)
+-- ============================================================
+create table public.ngo_medical_logs (
+  id uuid primary key default gen_random_uuid(),
+  animal_id uuid not null references public.rescued_animals(id) on delete cascade,
+  category text, notes text, vet_name text,
+  created_at timestamptz default now()
+);
+alter table public.ngo_medical_logs enable row level security;
+create policy "Org manages own animal medical logs" on public.ngo_medical_logs for all
+  using (exists (select 1 from public.rescued_animals where rescued_animals.id = ngo_medical_logs.animal_id and (rescued_animals.org_id = auth.uid() or is_admin())))
+  with check (exists (select 1 from public.rescued_animals where rescued_animals.id = ngo_medical_logs.animal_id and (rescued_animals.org_id = auth.uid() or is_admin())));
+
+-- ============================================================
+-- 25. STRAY REPORTS
+-- ============================================================
+create table public.stray_reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter_name text, reporter_contact text,
+  description text, photo_url text,
+  latitude numeric, longitude numeric,
+  urgency text default 'LOW',
+  status text default 'reported',
+  assigned_volunteer_id uuid references public.ngo_volunteers(id),
+  assigned_volunteer_name text,
+  resolution_notes text,
+  created_at timestamptz default now()
+);
+alter table public.stray_reports enable row level security;
+
+create policy "Anyone authenticated can view stray reports" on public.stray_reports for select to authenticated using (true);
+create policy "Anyone authenticated can report strays" on public.stray_reports for insert to authenticated with check (true);
+create policy "NGOs can update stray reports" on public.stray_reports for update
+  to authenticated using (exists (select 1 from public.users where id = auth.uid() and role in ('ngo','admin')))
+  with check (exists (select 1 from public.users where id = auth.uid() and role in ('ngo','admin')));
+
+-- ============================================================
+-- 26. STORAGE POLICIES
+-- Create these 3 buckets manually first in Supabase Dashboard → Storage:
+--   pet-photos        (Public: ON)
+--   journal-photos     (Public: ON)
+--   medical-attachments (Public: OFF)
+-- Then run the policies below.
+-- ============================================================
+
+create policy "Owners manage own pet photos" on storage.objects for all
+  using (bucket_id = 'pet-photos' and auth.uid()::text = (storage.foldername(name))[1])
+  with check (bucket_id = 'pet-photos' and auth.uid()::text = (storage.foldername(name))[1]);
+create policy "Anyone can view pet photos" on storage.objects for select using (bucket_id = 'pet-photos');
+
+create policy "Owners manage own journal photos" on storage.objects for all
+  using (bucket_id = 'journal-photos' and auth.uid()::text = (storage.foldername(name))[1])
+  with check (bucket_id = 'journal-photos' and auth.uid()::text = (storage.foldername(name))[1]);
+create policy "Anyone can view journal photos" on storage.objects for select using (bucket_id = 'journal-photos');
+
+create policy "Owners manage own medical attachments" on storage.objects for all
+  using (bucket_id = 'medical-attachments' and auth.uid()::text = (storage.foldername(name))[1])
+  with check (bucket_id = 'medical-attachments' and auth.uid()::text = (storage.foldername(name))[1]);
+
+-- ============================================================
+-- END OF SCHEMA
+-- ============================================================
