@@ -22,7 +22,7 @@ import { renderNGO } from './ngo.js';
 import { renderCommunity } from './community.js';
 import { renderAI } from './ai.js';
 import { renderProfile, renderSettings } from './settings.js';
-import { renderAdminDashboard, renderAdminLogin, ADMIN_EMAILS } from './admin.js';
+import { renderAdminDashboard, renderAdminLogin } from './admin.js';
 import { renderOrders } from './orders.js';
 import { renderAdoptionCenter } from './adoptions-client.js';
 import { renderServices } from './services.js';
@@ -552,7 +552,7 @@ export async function checkPortalGuards(user, hash) {
     if (role === 'vet') Router.navigate('/vet-portal');
     else if (role === 'ngo') Router.navigate('/ngo');
     else if (role === 'service_provider') Router.navigate('/service-portal');
-    else if (role === 'admin' || ADMIN_EMAILS.includes(user.email)) Router.navigate('/admin');
+    else if (role === 'admin') Router.navigate('/admin');
     else Router.navigate('/dashboard');
     return;
   }
@@ -575,7 +575,7 @@ export async function checkPortalGuards(user, hash) {
       Router.navigate('/service-portal');
     }
   }
-  else if ((role === 'admin' || ADMIN_EMAILS.includes(user.email)) && pageType !== 'admin') {
+  if (role === 'admin' && pageType !== 'admin') {
     if (hash !== '#/profile' && hash !== '#/settings') {
       console.warn("Portal Guard: Redirecting Admin to Admin Console.");
       Router.navigate('/admin');

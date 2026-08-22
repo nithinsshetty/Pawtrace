@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",
-    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2"
   }
 }

@@ -293,27 +293,28 @@ router.post('/chat', async (req, res) => {
 
   const accessToken = authHeader.split('Bearer ')[1];
 
-let uid;
+  let uid;
 
-try {
-  const { data: { user }, error } = await supabase.auth.getUser(accessToken);
-
-  if (error || !user) {
-    return res.status(401).json({
-      error: 'Invalid or expired token.'
-    });
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    if (error || !user) {
+      return res.status(401).json({ error: 'Invalid or expired token.' });
+    }
+    uid = user.id;
+  } catch (err) {
+    console.error('Supabase authentication error:', err);
+    return res.status(401).json({ error: 'Invalid or expired token.' });
   }
 
-  uid = user.id;
-} catch (err) {
-  console.error('Supabase authentication error:', err);
-
-  return res.status(401).json({
-    error: 'Invalid or expired token.'
-  });
-}
-
   const { message } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'Message is required.' });
+  }
+
+  if (!process.env.GEMINI_API_KEY) {
+    console.error('GEMINI_API_KEY is not set in environment variables.');
+    return res.status(500).json({ error: 'Chatbot is not configured correctly. Missing API key.' });
+  }
 
   try {
     const firstResponse = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
@@ -328,14 +329,17 @@ try {
     });
 
     const firstData = await firstResponse.json();
-    console.log('First response:', JSON.stringify(firstData, null, 2));
+
+    if (!firstResponse.ok || firstData.error) {
+      console.error('Gemini API error:', firstResponse.status, firstData.error?.message || firstData);
+      return res.status(502).json({ error: 'The AI assistant is temporarily unavailable. Please try again.' });
+    }
 
     const parts = firstData.candidates?.[0]?.content?.parts ?? [];
     const functionCallPart = parts.find(p => p.functionCall);
 
     if (functionCallPart) {
       const { name, args } = functionCallPart.functionCall;
-      console.log(`Gemini wants to call: ${name} with args:`, args);
 
       let functionResult;
       if (name === 'getPetReminder') {
@@ -346,6 +350,8 @@ try {
         functionResult = await createReminder(args.petName, uid, args.reminderTitle, args.reminderType, args.dueDate);
       } else if (name === 'findFeatureLocation') {
         functionResult = findFeatureLocation(args.topic);
+      } else {
+        functionResult = { error: 'Unknown function requested.' };
       }
 
       const secondResponse = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
@@ -370,17 +376,30 @@ try {
       });
 
       const secondData = await secondResponse.json();
-      console.log('Second response:', JSON.stringify(secondData, null, 2));
-      const finalText = secondData.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No response';
+
+      if (!secondResponse.ok || secondData.error) {
+        console.error('Gemini API error (second call):', secondResponse.status, secondData.error?.message || secondData);
+        return res.status(502).json({ error: 'The AI assistant had trouble finishing that response. Please try again.' });
+      }
+
+      const finalText = secondData.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!finalText) {
+        console.error('Gemini returned no text in second response:', JSON.stringify(secondData));
+        return res.status(502).json({ error: 'The AI assistant could not generate a response. Please try again.' });
+      }
       return res.json({ reply: finalText });
     }
 
-    const reply = parts[0]?.text ?? 'No response';
+    const reply = parts[0]?.text;
+    if (!reply) {
+      console.error('Gemini returned no text and no function call:', JSON.stringify(firstData));
+      return res.status(502).json({ error: 'The AI assistant could not generate a response. Please try again.' });
+    }
     res.json({ reply });
 
   } catch (err) {
     console.error('Chatbot error:', err);
-    res.status(500).json({ error: 'Chatbot failed' });
+    res.status(500).json({ error: 'Chatbot failed. Please try again.' });
   }
 });
 

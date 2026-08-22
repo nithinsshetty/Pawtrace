@@ -48,16 +48,46 @@ create policy "Authenticated users can view vet and ngo directory" on public.use
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
-security definer set search_path = public
+security definer
+set search_path = public
 as $$
+declare
+  requested_role text;
+  safe_role text;
 begin
-  insert into public.users (id, email, display_name, role)
+  requested_role := coalesce(
+    new.raw_user_meta_data->>'role',
+    'customer'
+  );
+
+  safe_role := case
+    when requested_role in (
+      'customer',
+      'owner',
+      'vet',
+      'ngo',
+      'service_provider'
+    )
+    then requested_role
+    else 'customer'
+  end;
+
+  insert into public.users (
+    id,
+    email,
+    display_name,
+    role
+  )
   values (
     new.id,
     new.email,
-    coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1)),
-    coalesce(new.raw_user_meta_data->>'role', 'customer')
+    coalesce(
+      new.raw_user_meta_data->>'display_name',
+      split_part(new.email, '@', 1)
+    ),
+    safe_role
   );
+
   return new;
 end;
 $$;

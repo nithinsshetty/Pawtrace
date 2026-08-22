@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 
 let weightChartInstance = null;
@@ -43,15 +43,15 @@ export async function renderJournal(params) {
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
-            <span>${pet.name}</span>
+            <span>${escapeHTML(pet.name)}</span>
             <span class="pet-status-badge ${pet.is_lost ? 'lost' : 'safe'}">
               ${pet.is_lost ? 'LOST' : 'SAFE'}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
+            <i class="fa-solid fa-dna"></i> ${escapeHTML(pet.breed)} &nbsp;|&nbsp;
             <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
-            <i class="fa-solid fa-id-card"></i> ${pet.pawtrace_id}
+            <i class="fa-solid fa-id-card"></i> ${escapeHTML(pet.pawtrace_id)}
           </p>
         </div>
         <div class="detail-actions">
@@ -181,7 +181,7 @@ async function loadJournalEntries(petId) {
         `;
       }
 
-      item.innerHTML = `
+            item.innerHTML = `
         <div class="timeline-dot" style="background:var(--terracotta);"></div>
         <div class="glass-card timeline-content">
           <div class="flex-between">
@@ -194,9 +194,10 @@ async function loadJournalEntries(petId) {
             </div>
           </div>
           ${imgMarkup}
-          <p class="timeline-body mt-1" style="font-size:0.9rem;">${record.notes || 'Notes'}</p>
+          <p class="timeline-body mt-1" style="font-size:0.9rem;">${escapeHTML(record.notes || 'Notes')}</p>
         </div>
       `;
+      
       container.appendChild(item);
     });
 

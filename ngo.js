@@ -4,8 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, uploadToStorage } from './utils.js';
-
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, uploadToStorage, escapeHTML } from './utils.js';
 let activeNgoTab = 'dashboard';
 
 export async function renderNGO() {
@@ -40,7 +39,7 @@ export async function renderNGO() {
     viewport.innerHTML = `
       <div style="margin-bottom: 1.5rem;">
         <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.6rem; font-weight: 700;">Rescue Command Center</h2>
-        <p style="color: var(--text-muted); font-size: 0.9rem;">${orgName} ${ngoDetails.approved ? '<span style="color:var(--accent-green); font-weight:600;"><i class="fa-solid fa-circle-check"></i> Approved</span>' : '<span style="color:var(--accent-yellow); font-weight:600;"><i class="fa-solid fa-clock"></i> Pending Approval</span>'}</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">${escapeHTML(orgName)} ${ngoDetails.approved ? '<span style="color:var(--accent-green); font-weight:600;"><i class="fa-solid fa-circle-check"></i> Approved</span>' : '<span style="color:var(--accent-yellow); font-weight:600;"><i class="fa-solid fa-clock"></i> Pending Approval</span>'}</p>
       </div>
       <div class="detail-tabs mb-2" id="ngo-tabs" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
         <span class="tab-link active" data-tab="dashboard" style="cursor:pointer;">Dashboard</span>
@@ -173,9 +172,9 @@ async function loadCensusList(orgId, container) {
         ${a.photo_url ? `<img src="${a.photo_url}" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fa-solid fa-paw fa-2x" style="color:var(--text-muted);"></i>`}
         <span class="pet-status-badge" style="background:${badgeColor}; text-transform:uppercase; font-size:0.6rem;">${a.intake_status}</span>
       </div>
-      <div class="pet-card-content">
-        <h4 class="pet-card-name">${a.pet_name}</h4>
-        <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted);"><span>${a.species || ''} &bull; ${a.breed || 'Unknown'}</span></div>
+            <div class="pet-card-content">
+        <h4 class="pet-card-name">${escapeHTML(a.pet_name)}</h4>
+        <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted);"><span>${escapeHTML(a.species || '')} &bull; ${escapeHTML(a.breed || 'Unknown')}</span></div>
         <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
           <button class="btn btn-outline btn-manage-animal" data-id="${a.id}" style="flex:1; font-size:0.75rem; padding:0.4rem;">Manage</button>
           ${a.status === 'available' ? `<span class="pet-status-badge safe" style="position:static; font-size:0.6rem;">ON BOARD</span>` : `<button class="btn btn-secondary btn-publish-animal" data-id="${a.id}" style="flex:1; font-size:0.75rem; padding:0.4rem;">Publish</button>`}
@@ -283,7 +282,7 @@ function showIntakeModal(orgId, onDone) {
 
 function showAnimalCaseModal(animal, orgId, onDone) {
   showModal({
-    title: `Case File: ${animal.pet_name}`,
+        title: `Case File: ${escapeHTML(animal.pet_name)}`,
     bodyHtml: `
       <div style="display:flex; flex-direction:column; gap:1rem; max-height:500px; overflow-y:auto;">
         <div class="form-group">
@@ -326,7 +325,7 @@ function showAnimalCaseModal(animal, orgId, onDone) {
     const box = document.getElementById('case-med-logs');
     if (!box) return;
     box.innerHTML = (!logs || logs.length === 0) ? '<p style="color:var(--text-muted);">No medical logs yet.</p>' :
-      logs.map(l => `<div style="border-bottom:1px solid var(--border-glass); padding-bottom:0.35rem;"><strong>${l.category}</strong>: ${l.notes} <span style="color:var(--text-muted); font-size:0.7rem;">(${formatFriendlyDate(l.created_at)})</span></div>`).join('');
+            logs.map(l => `<div style="border-bottom:1px solid var(--border-glass); padding-bottom:0.35rem;"><strong>${escapeHTML(l.category)}</strong>: ${escapeHTML(l.notes)} <span style="color:var(--text-muted); font-size:0.7rem;">(${formatFriendlyDate(l.created_at)})</span></div>`).join('');
   };
   loadMedLogs();
 
@@ -371,13 +370,13 @@ async function renderFosters(container, orgId) {
     const list = document.getElementById('fosters-list');
     const { data: fosters } = await supabase.from('ngo_fosters').select('*').eq('org_id', orgId);
     if (!fosters || fosters.length === 0) { list.innerHTML = '<div class="empty-state-mini"><p>No fosters registered.</p></div>'; return; }
-    list.innerHTML = fosters.map(f => `
+        list.innerHTML = fosters.map(f => `
       <div class="glass-card" style="padding:0.85rem;">
         <div style="display:flex; justify-content:space-between;">
-          <strong>${f.name}</strong>
-          <span class="pet-status-badge safe" style="position:static; font-size:0.6rem; background:${f.availability_status === 'AVAILABLE' ? 'var(--accent-green)' : 'var(--accent-yellow)'};">${f.availability_status}</span>
+          <strong>${escapeHTML(f.name)}</strong>
+          <span class="pet-status-badge safe" style="position:static; font-size:0.6rem; background:${f.availability_status === 'AVAILABLE' ? 'var(--accent-green)' : 'var(--accent-yellow)'};">${escapeHTML(f.availability_status)}</span>
         </div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">${f.phone || ''} ${f.email ? '&bull; ' + f.email : ''}</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHTML(f.phone || '')} ${f.email ? '&bull; ' + escapeHTML(f.email) : ''}</div>
         <div style="font-size:0.75rem; color:var(--text-muted);">Capacity: ${(f.current_placements || []).length}/${f.max_capacity}</div>
       </div>
     `).join('');
@@ -432,9 +431,9 @@ async function renderVolunteers(container, orgId) {
     if (!vols || vols.length === 0) { list.innerHTML = '<div class="empty-state-mini"><p>No volunteers registered.</p></div>'; return; }
     list.innerHTML = vols.map(v => `
       <div class="glass-card" style="padding:0.85rem;">
-        <strong>${v.name}</strong>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">${v.phone || ''}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted);">Skills: ${(v.skills || []).join(', ') || 'N/A'} &bull; ${v.availability_schedule || ''}</div>
+        <strong>${escapeHTML(v.name)}</strong>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHTML(v.phone || '')}</div>
+        <div style="font-size:0.75rem; color:var(--text-muted);">Skills: ${escapeHTML((v.skills || []).join(', ') || 'N/A')} &bull; ${escapeHTML(v.availability_schedule || '')}</div>
       </div>
     `).join('');
   };
@@ -478,13 +477,13 @@ async function renderAdoptionApplications(container, orgId) {
     return `
       <div class="glass-card" style="padding:1.25rem;">
         <div class="flex-between">
-          <strong style="color:var(--teal);">${app.rescued_animals?.pet_name || 'Animal'}</strong>
+          <strong style="color:var(--teal);">${escapeHTML(app.rescued_animals?.pet_name || 'Animal')}</strong>
           <span class="pet-status-badge safe" style="position:static; font-size:0.65rem; background:${badgeColor};">${app.status}</span>
         </div>
         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem; line-height:1.4;">
-          <div><strong>Applicant:</strong> ${app.applicant_name} (${app.applicant_phone})</div>
-          <div><strong>City:</strong> ${app.applicant_city} &bull; <strong>Housing:</strong> ${app.housing_type}</div>
-          <div><strong>Reason:</strong> ${app.reason}</div>
+          <div><strong>Applicant:</strong> ${escapeHTML(app.applicant_name)} (${escapeHTML(app.applicant_phone)})</div>
+          <div><strong>City:</strong> ${escapeHTML(app.applicant_city)} &bull; <strong>Housing:</strong> ${escapeHTML(app.housing_type)}</div>
+          <div><strong>Reason:</strong> ${escapeHTML(app.reason)}</div>
         </div>
         ${actions}
       </div>
@@ -535,11 +534,11 @@ async function renderStrayReports(container, orgId) {
   list.innerHTML = reports.map(r => `
     <div class="glass-card" style="padding:1.25rem;">
       <div class="flex-between">
-        <strong>${r.reporter_name || 'Anonymous Reporter'}</strong>
+        <strong>${escapeHTML(r.reporter_name || 'Anonymous Reporter')}</strong>
         <span class="pet-status-badge ${r.status === 'reported' ? 'lost' : 'safe'}" style="position:static; font-size:0.65rem;">${r.status.toUpperCase()}</span>
       </div>
-      <p style="font-size:0.8rem; color:var(--text-muted); margin:0.5rem 0;">${r.description || ''}</p>
-      <div style="font-size:0.75rem; color:var(--text-muted);">Contact: ${r.reporter_contact || 'N/A'} &bull; Urgency: ${r.urgency}</div>
+      <p style="font-size:0.8rem; color:var(--text-muted); margin:0.5rem 0;">${escapeHTML(r.description || '')}</p>
+      <div style="font-size:0.75rem; color:var(--text-muted);">Contact: ${escapeHTML(r.reporter_contact || 'N/A')} &bull; Urgency: ${r.urgency}</div>
       ${r.status === 'reported' ? `
         <div style="display:flex; gap:0.5rem; margin-top:0.75rem; align-items:center;">
           <select class="form-control assign-vol-select" data-id="${r.id}" style="font-size:0.75rem; flex:1;">
@@ -578,9 +577,9 @@ async function renderOrgProfile(container, orgId, userData) {
     <div class="glass-card" style="max-width:600px;">
       <h3 style="font-weight:700; margin-bottom:1rem;">Organization Profile</h3>
       <form id="org-profile-form" style="display:flex; flex-direction:column; gap:0.85rem;">
-        <div class="form-group"><label>Organization Name *</label><input type="text" id="org-name" class="form-control" value="${details.orgName || userData.display_name || ''}" required></div>
-        <div class="form-group"><label>Registration ID</label><input type="text" id="org-reg" class="form-control" value="${details.registrationId || ''}"></div>
-        <div class="form-group"><label>Location / City</label><input type="text" id="org-location" class="form-control" value="${details.location || ''}"></div>
+        <div class="form-group"><label>Organization Name *</label><input type="text" id="org-name" class="form-control" value="${escapeHTML(details.orgName || userData.display_name || '')}" required></div>
+        <div class="form-group"><label>Registration ID</label><input type="text" id="org-reg" class="form-control" value="${escapeHTML(details.registrationId || '')}"></div>
+        <div class="form-group"><label>Location / City</label><input type="text" id="org-location" class="form-control" value="${escapeHTML(details.location || '')}"></div>
         <button type="submit" class="btn btn-primary">Save Profile</button>
       </form>
     </div>

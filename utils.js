@@ -2,6 +2,15 @@
 // PAWTRACE UTILITIES & GLOBAL CONTROLLER INTERFACES
 // ==========================================================================
 import { supabase } from './supabase-config.js';
+
+export function escapeHTML(str) {
+  if (str === null || str === undefined) return '';
+
+  const div = document.createElement('div');
+  div.textContent = String(str);
+
+  return div.innerHTML;
+}
 /**
  * Toast notification controller
  * @param {string} message - The message text
@@ -23,7 +32,7 @@ export function showToast(message, type = 'info', duration = 4000) {
 
   toast.innerHTML = `
     <i class="fa-solid ${iconClass}"></i>
-    <span>${message}</span>
+    <span>${escapeHTML(message)}</span>
   `;
 
   container.appendChild(toast);
@@ -351,10 +360,10 @@ export function getPetImageHTML(pet, sizeClass = '') {
   const imgUrl = pet.profileImage || pet.photo || '';
   
   return `
-    <img src="${imgUrl}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="display: ${imgUrl ? 'block' : 'none'}; width:100%; height:100%; object-fit:cover;">
-    <div class="pet-placeholder-card ${sizeClass}" style="background: ${placeholder.background}; display: ${imgUrl ? 'none' : 'flex'};">
+    <img src="${escapeHTML(imgUrl)}" alt="${escapeHTML(name)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="display: ${imgUrl ? 'block' : 'none'}; width:100%; height:100%; object-fit:cover;">
+    <div class="pet-placeholder-card ${escapeHTML(sizeClass)}" style="background: ${placeholder.background}; display: ${imgUrl ? 'none' : 'flex'};">
       <span class="pet-placeholder-emoji">${placeholder.emoji}</span>
-      ${sizeClass === 'large' || sizeClass === '' ? `<span class="pet-placeholder-name">${name}</span>` : ''}
+      ${sizeClass === 'large' || sizeClass === '' ? `<span class="pet-placeholder-name">${escapeHTML(name)}</span>` : ''}
     </div>
   `;
 }

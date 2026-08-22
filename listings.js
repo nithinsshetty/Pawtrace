@@ -1,20 +1,21 @@
 // listings.js — Supabase version
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 
-// TODO: services.js not yet migrated — reconnect real showReportModal once it is.
-function showReportModal(type, id, user) {
-  showToast("Reporting is temporarily unavailable while this module is being upgraded.", "info");
-}
 
 export async function createPetListing(sellerUserId, listingData) {
   const { error } = await supabase.from('pet_listings').insert({
     seller_user_id: sellerUserId,
     pet_id: listingData.petId,
-    name: listingData.name, breed: listingData.breed, age: listingData.age, gender: listingData.gender,
-    price: listingData.price, description: listingData.description, photos: listingData.photos || [],
+    name: escapeHTML(listingData.name),
+    breed: escapeHTML(listingData.breed),
+    age: listingData.age,
+    gender: escapeHTML(listingData.gender),
+    price: listingData.price,
+    description: escapeHTML(listingData.description),
+    photos: listingData.photos || [],
     status: 'available'
   });
   if (error) throw error;
@@ -118,22 +119,21 @@ async function renderBrowseListings(container, user) {
 
       const card = document.createElement('div');
       card.className = 'glass-card pet-card';
-      card.innerHTML = `
+            card.innerHTML = `
         ${imageHTML}
         <div class="pet-card-content" style="display:flex; flex-direction:column; justify-content:space-between; flex:1;">
           <div>
             <h4 class="pet-card-name" style="font-size:1.2rem; font-weight:800; display:flex; justify-content:space-between; align-items:center; color: var(--teal);">
-              <span>${petName}</span><span style="font-size:1rem; color:var(--terracotta);">$${listing.price}</span>
+              <span>${escapeHTML(petName)}</span><span style="font-size:1rem; color:var(--terracotta);">$${listing.price}</span>
             </h4>
             <div class="pet-card-meta" style="flex-direction:column; gap:0.25rem; align-items:flex-start; margin-top:0.5rem; margin-bottom:0.75rem;">
-              <span><strong>Breed:</strong> ${petBreed}</span>
-              <span><strong>Gender/Age:</strong> ${petGender} &bull; ${petAge}</span>
-              <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4; margin-top:0.4rem;">${listing.description || 'No description provided.'}</p>
+              <span><strong>Breed:</strong> ${escapeHTML(petBreed)}</span>
+              <span><strong>Gender/Age:</strong> ${escapeHTML(petGender)} &bull; ${escapeHTML(petAge)}</span>
+              <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4; margin-top:0.4rem;">${escapeHTML(listing.description || 'No description provided.')}</p>
             </div>
           </div>
           <div style="border-top:1px solid var(--border-glass); padding-top:0.75rem; margin-top:0.5rem;">
-            <button class="btn btn-primary btn-full contact-seller-btn" style="font-size:0.8rem; padding:0.5rem;"><i class="fa-solid fa-envelope"></i> Contact Seller (${sellerData.display_name})</button>
-            <button class="btn btn-danger btn-full report-listing-btn mt-1" style="font-size:0.75rem; padding:0.3rem 0.5rem; background:transparent; border:1px solid var(--accent-red); color:var(--accent-red);"><i class="fa-solid fa-triangle-exclamation"></i> Flag Post</button>
+            <button class="btn btn-primary btn-full contact-seller-btn" style="font-size:0.8rem; padding:0.5rem;"><i class="fa-solid fa-envelope"></i> Contact Seller (${escapeHTML(sellerData.display_name)})</button>
           </div>
         </div>
       `;
@@ -141,11 +141,11 @@ async function renderBrowseListings(container, user) {
       card.querySelector('.contact-seller-btn').onclick = () => {
         showModal({
           title: `Contact Seller`,
-          bodyHtml: `<div class="text-center" style="padding:1rem 0;"><i class="fa-solid fa-address-card fa-3x" style="color:var(--teal); margin-bottom:1rem;"></i><h3>${sellerData.display_name}</h3><p style="color:var(--text-muted); font-size:0.9rem; margin-top:0.5rem;">Email: <strong style="color:var(--text-main);">${sellerData.email}</strong></p></div>`,
+          bodyHtml: `<div class="text-center" style="padding:1rem 0;"><i class="fa-solid fa-address-card fa-3x" style="color:var(--teal); margin-bottom:1rem;"></i><h3>${escapeHTML(sellerData.display_name)}</h3><p style="color:var(--text-muted); font-size:0.9rem; margin-top:0.5rem;">Email: <strong style="color:var(--text-main);">${escapeHTML(sellerData.email)}</strong></p></div>`,
           confirmText: "Close", onConfirm: () => { closeModal(); return false; }
         });
       };
-      card.querySelector('.report-listing-btn').onclick = () => showReportModal('listing', listing.id, user);
+        
       board.appendChild(card);
     }
   } catch (error) {
@@ -250,11 +250,11 @@ async function renderMyListings(container, user) {
       div.style.padding = '1rem';
       div.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-          <div><strong style="color:var(--teal);">${name}</strong> - Price: $${listing.price}
+          <div><strong style="color:var(--teal);">${escapeHTML(name)}</strong> - Price: $${listing.price}
             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Posted: ${formatFriendlyDate(listing.created_at)}</div>
           </div>
           <div style="display:flex; gap:0.5rem; align-items:center;">
-            <span class="pet-status-badge ${listing.status === 'available' ? 'safe' : 'lost'}">${listing.status.toUpperCase()}</span>
+            <span class="pet-status-badge ${listing.status === 'available' ? 'safe' : 'lost'}">${escapeHTML(listing.status.toUpperCase())}</span>
             ${listing.status === 'available' ? `<button class="btn btn-outline mark-sold-btn" data-id="${listing.id}" style="font-size:0.75rem; padding:0.4rem 0.8rem;">Mark Sold</button>` : ''}
           </div>
         </div>

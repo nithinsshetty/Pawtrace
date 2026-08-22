@@ -8,10 +8,7 @@ import { showToast, showLoading, formatFriendlyDate, showModal } from './utils.j
 import { Router } from './router.js';
 import { initPasswordToggles } from './pages.js';
 
-// Hardcoded admin email addresses for fallback verification
-export const ADMIN_EMAILS = [
-  'nss@pt.com'
-];
+
 
 /**
  * Checks if the current authenticated user has admin privileges
@@ -20,12 +17,15 @@ export async function isAdmin() {
   const user = getCurrentUser();
   if (!user) return false;
 
-  if (ADMIN_EMAILS.includes(user.email)) return true;
-  if (user.role === 'admin') return true;
-
   try {
-    const { data, error } = await supabase.from('users').select('role').eq('id', user.uid).single();
+    const { data, error } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', user.uid)
+      .single();
+
     if (error) throw error;
+
     return data?.role === 'admin';
   } catch (err) {
     console.error("Admin verification error:", err);
@@ -86,15 +86,21 @@ export function renderAdminLogin() {
     const email = document.getElementById('admin-email').value.trim();
     const password = document.getElementById('admin-password').value;
 
-    if (!ADMIN_EMAILS.includes(email)) {
-      showToast("Access Denied: Email is not registered as an administrator.", "error");
-      return;
-    }
+    
 
     showLoading(true, "Authenticating Admin...");
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      const adminStatus = await isAdmin();
+
+      if (!adminStatus) {
+        await supabase.auth.signOut();
+        throw new Error("This account does not have administrator privileges.");
+      }
+
+      showToast("Admin authenticated.", "success");
+      Router.navigate('/admin');
       showToast("Admin authenticated.", "success");
       Router.navigate('/admin');
     } catch (error) {
@@ -462,7 +468,7 @@ async function renderUsersTab(container) {
     let actionBtn = '';
     const currentAdmin = getCurrentUser();
     const currentAdminId = currentAdmin ? currentAdmin.uid : null;
-    const isHeadAdmin = currentAdmin && ADMIN_EMAILS.includes(currentAdmin.email);
+    const isHeadAdmin = currentAdmin && currentAdmin.isHeadAdmin === true;
 
     if (user.role !== 'admin') {
       if (isHeadAdmin) {
@@ -772,10 +778,9 @@ export async function activatePetQR(orderId, petId, ownerId) {
     showLoading(false);
   }
 }
-
 export async function makeUserAdmin(userId, displayName) {
   const currentAdmin = getCurrentUser();
-  if (!currentAdmin || !ADMIN_EMAILS.includes(currentAdmin.email)) {
+  if (!currentAdmin || currentAdmin.isHeadAdmin !== true) {
     showToast("Permission Denied. Only the head administrator can grant admin access.", "error");
     return;
   }
@@ -795,7 +800,7 @@ export async function makeUserAdmin(userId, displayName) {
 
 export async function demoteAdmin(userId, displayName) {
   const currentAdmin = getCurrentUser();
-  if (!currentAdmin || !ADMIN_EMAILS.includes(currentAdmin.email)) {
+  if (!currentAdmin || currentAdmin.isHeadAdmin !== true) {
     showToast("Permission Denied. Only the head administrator can revoke admin access.", "error");
     return;
   }
@@ -819,6 +824,8 @@ export async function demoteAdmin(userId, displayName) {
     showLoading(false);
   }
 }
+
+
 
 export async function toggleDoctorVerification(vetId, verify) {
   showLoading(true, "Updating veterinarian verification status...");

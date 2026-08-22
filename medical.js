@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 
 let currentFilter = 'All';
@@ -43,13 +43,13 @@ export async function renderMedical(params) {
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
-            <span>${pet.name}</span>
+            <span>${escapeHTML(pet.name)}</span>
             <span class="pet-status-badge ${pet.is_lost ? 'lost' : 'safe'}">
               ${pet.is_lost ? 'LOST' : 'SAFE'}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
+            <i class="fa-solid fa-dna"></i> ${escapeHTML(pet.breed)} &nbsp;|&nbsp;
             <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
             <i class="fa-solid fa-id-card"></i> ${pet.pawtrace_id}
           </p>
@@ -166,14 +166,14 @@ async function loadMedicalRecords(petId) {
       const item = document.createElement('div');
       item.className = `timeline-item ${record.record_type.toLowerCase()}`;
 
-      let attachmentMarkup = '';
+           let attachmentMarkup = '';
       if (record.attachment_url) {
         const isPdf = record.attachment_name && record.attachment_name.toLowerCase().endsWith('.pdf');
         const icon = isPdf ? 'fa-file-pdf' : 'fa-file-image';
         attachmentMarkup = `
           <a href="${record.attachment_url}" target="_blank" class="timeline-attachment">
             <i class="fa-solid ${icon}"></i>
-            <span>${record.attachment_name || 'Prescription file'}</span>
+            <span>${escapeHTML(record.attachment_name || 'Prescription file')}</span>
           </a>
         `;
       }
@@ -185,15 +185,15 @@ async function loadMedicalRecords(petId) {
             <span class="timeline-date">${formatFriendlyDate(record.visit_date)}</span>
             <div style="display:flex; gap:0.5rem; align-items:center;">
               <span class="pet-status-badge safe" style="background: var(--teal); opacity: 0.8; text-transform:none;">
-                ${record.record_type}
+                ${escapeHTML(record.record_type)}
               </span>
               <button class="icon-btn btn-delete-record" data-id="${record.id}" style="width:28px; height:28px; background:transparent; border:none; color:var(--text-muted);">
                 <i class="fa-solid fa-trash" style="font-size:0.8rem;"></i>
               </button>
             </div>
           </div>
-          <h4 class="timeline-title mt-1">${record.title}</h4>
-          <p class="timeline-body">${record.description || 'No description notes added.'}</p>
+          <h4 class="timeline-title mt-1">${escapeHTML(record.title)}</h4>
+          <p class="timeline-body">${escapeHTML(record.description || 'No description notes added.')}</p>
           ${attachmentMarkup}
         </div>
       `;

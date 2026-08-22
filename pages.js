@@ -5,7 +5,7 @@
 // removed from this file — they were dead code, shadowed by dashboard.js,
 // settings.js, and pets.js respectively (see app.js imports).
 
-import { signIn, signUp, getCurrentUser, ADMIN_EMAILS } from './auth.js';
+import { signIn, signUp, getCurrentUser } from './auth.js';
 import { supabase } from './supabase-config.js';
 import { showToast, showLoading } from './utils.js';
 import { Router } from './router.js';
@@ -82,32 +82,19 @@ export function renderLogin() {
 
   const form = document.getElementById('login-form');
   form.onsubmit = async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('login-email').value.trim();
-    const password = document.getElementById('login-password').value;
+  e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
 
-    try {
-      await signIn(email, password);
-
-      const user = getCurrentUser();
-      if (user) {
-        let targetRoute = '/dashboard';
-        const role = user.role;
-        if (role === 'vet') {
-          targetRoute = '/vet-portal';
-        } else if (role === 'ngo') {
-          targetRoute = '/ngo';
-        } else if (role === 'admin' || ADMIN_EMAILS.includes(user.email)) {
-          targetRoute = '/admin';
-        }
-        Router.navigate(targetRoute);
-      } else {
-        Router.navigate('/dashboard');
-      }
-    } catch (err) {
-      // Handled in auth.js
-    }
-  };
+  try {
+    await signIn(email, password);
+    // Routing is handled entirely by the onAuthStateChange listener in
+    // auth.js, which calls Router.resolve() -> checkPortalGuards once the
+    // verified profile is loaded.
+  } catch (err) {
+    // Handled in auth.js (toast already shown)
+  }
+};
 }
 
 /**

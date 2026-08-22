@@ -5,7 +5,7 @@
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
 import { showToast, showLoading, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate } from './utils.js';
-
+import { escapeHTML } from './utils.js';
 let currentFilter = 'All';
 
 export async function renderCommunity() {
@@ -144,7 +144,7 @@ async function loadTopContributors() {
       <div style="display:flex; gap:0.5rem; align-items:center; text-align:left; font-size:0.8rem;">
         <div style="width:32px; height:32px; border-radius:50%; overflow:hidden;"><img src="https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(c.display_name || c.id)}" style="width:100%; height:100%;"></div>
         <div>
-          <strong>${c.display_name || 'Contributor'}</strong> ${c.role === 'vet' ? '<i class="fa-solid fa-circle-check verified-icon"></i>' : '<i class="fa-solid fa-shield-heart ngo-verified-icon"></i>'}
+          <strong>${escapeHTML(c.display_name || 'Contributor')}</strong>${c.role === 'vet' ? '<i class="fa-solid fa-circle-check verified-icon"></i>' : '<i class="fa-solid fa-shield-heart ngo-verified-icon"></i>'}
           <span style="font-size:0.65rem; color:var(--text-muted); display:block;">${c.role === 'vet' ? 'Verified Veterinarian' : 'NGO Coordinator'}</span>
         </div>
       </div>
@@ -211,8 +211,8 @@ async function loadCommunityPosts() {
           </div>
         </div>
 
-        <h3 class="post-title">${post.title}</h3>
-        <p class="post-body">${post.content}</p>
+        <h3 class="post-title">${escapeHTML(post.title)}</h3>
+        <p class="post-body">${escapeHTML(post.content)}</p>
 
         ${post.photo_url ? `<img src="${post.photo_url}" class="post-image" alt="Milestone Photo">` : ''}
 
@@ -346,10 +346,10 @@ async function loadCommentsFeed(postId) {
       div.className = 'comment-item';
       div.innerHTML = `
         <div class="comment-author-row">
-          <strong style="color:var(--teal);">${(c.users && c.users.display_name) || 'PawTrace User'}</strong>
+          <strong style="color:var(--teal);">${escapeHTML((c.users && c.users.display_name) || 'PawTrace User')}</strong>
           <span style="font-size:0.65rem; color:var(--text-muted);">${formatFriendlyDate(c.created_at)}</span>
         </div>
-        <p style="margin:0; font-size:0.8rem; line-height:1.3;">${c.content}</p>
+        <p style="margin:0; font-size:0.8rem; line-height:1.3;">${escapeHTML(c.content)}</p>
       `;
       container.appendChild(div);
     });

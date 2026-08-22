@@ -185,6 +185,11 @@ SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
 PORT=5000
 ```
 The service-role key must remain private and must only be used by the backend — never place it in any frontend file.
+   ### Gemini API Configuration
+   The chatbot requires a Gemini API key.
+   Create a `.env` file inside the `backend` directory:
+   GEMINI\_API\_KEY=your\_gemini\_api\_key\_here
+   PORT=5000
 
 ## Step 7 — Install Backend Dependencies
 ```bash

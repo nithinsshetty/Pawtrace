@@ -4,10 +4,11 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, calculateAge, getPetImageHTML, getPetPlaceholder, generatePawTraceId, uploadToStorage } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, calculateAge, getPetImageHTML, getPetPlaceholder, generatePawTraceId, uploadToStorage, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 import { renderCaregiverManager } from './caregiver.js';
 import { showOrderModal } from './orders.js';
+
 
 /**
  * Checks if all mandatory fields are filled. Operates on the JS-shaped pet
@@ -97,7 +98,6 @@ export async function renderPets() {
   const viewport = document.getElementById('app-viewport');
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = 'My Companions';
-
   const user = getCurrentUser();
   if (!user) return;
 
@@ -181,24 +181,24 @@ async function loadUserPetsList(uid) {
         </div>
         <div class="pet-card-content">
           <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>${pet.name}</span>
-            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight:500;">${pet.pawTraceId || 'PT-PENDING'}</span>
+            <span>${escapeHTML(pet.name)}</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted); font-weight:500;">${escapeHTML(pet.pawTraceId || 'PT-PENDING')}</span>
           </h4>
           <div class="pet-card-meta">
-            <span><i class="fa-solid fa-dna"></i> ${pet.breed || 'Unknown'}</span>
+            <span><i class="fa-solid fa-dna"></i> ${escapeHTML(pet.breed || 'Unknown')}</span>
             <span>•</span>
-            <span><i class="fa-solid fa-venus-mars"></i> ${pet.gender || 'N/A'}</span>
+            <span><i class="fa-solid fa-venus-mars"></i> ${escapeHTML(pet.gender || 'N/A')}</span>
           </div>
           <div class="pet-card-actions" style="flex-wrap: wrap; gap: 0.5rem 0;">
             <a href="${actionLink}" class="btn btn-secondary" style="font-size:0.8rem; padding: 0.5rem 1rem; flex: 1;">
               ${actionText}
             </a>
-            <button class="btn btn-danger btn-delete-pet" data-id="${pet.id}" data-name="${pet.name}" style="padding: 0.5rem;">
+            <button class="btn btn-danger btn-delete-pet" data-id="${pet.id}" data-name="${escapeHTML(pet.name)}" style="padding: 0.5rem;">
               <i class="fa-solid fa-trash"></i>
             </button>
             ${!isDraft ? `
               <a href="#/marketplace/new/${pet.id}" class="btn btn-outline btn-full" style="font-size:0.75rem; padding: 0.40rem; border:1px solid var(--terracotta); color:var(--terracotta); width: 100%; text-align: center;">
-                <i class="fa-solid fa-store"></i> List on Marketplace
+                 <i class="fa-solid fa-store"></i> List on Marketplace
               </a>
             ` : ''}
           </div>
@@ -233,7 +233,7 @@ function confirmDeletePet(id, name) {
     bodyHtml: `
       <div style="text-align:center; padding: 1rem 0;">
         <i class="fa-solid fa-triangle-exclamation" style="font-size: 3rem; color:var(--accent-red); margin-bottom:1rem;"></i>
-        <p>Are you sure you want to permanently delete the profile for <strong>${name}</strong>?</p>
+        <p>Are you sure you want to permanently delete the profile for <strong>${escapeHTML(name)}</strong>?</p>
         <p style="font-size: 0.8rem; color: var(--text-muted); margin-top:0.5rem;">This will delete all medical records, reminders, and journal timelines. This action cannot be undone.</p>
       </div>
     `,
@@ -242,7 +242,7 @@ function confirmDeletePet(id, name) {
       try {
         const { error } = await supabase.from('pets').delete().eq('id', id);
         if (error) throw error;
-        showToast(`Profile for ${name} deleted.`, "info");
+        showToast(`Profile for ${escapeHTML(name)} deleted.`, "info");
         renderPets();
         return false;
       } catch (err) {
@@ -308,16 +308,16 @@ export async function renderPetDetail(params) {
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
-            <span>${pet.name}</span>
+            <span>${escapeHTML(pet.name)}</span>
             <span class="pet-status-badge ${pet.lostStatus === 'LOST' ? 'lost' : !isProfileComplete(pet) ? 'warning' : 'safe'}" id="detail-status-badge">
               ${pet.lostStatus || (!isProfileComplete(pet) ? 'INCOMPLETE' : 'SAFE')}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
-            <i class="fa-solid fa-venus-mars"></i> ${pet.gender} &nbsp;|&nbsp;
-            <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
-            <i class="fa-solid fa-id-card"></i> ${pet.pawTraceId}
+            <i class="fa-solid fa-dna"></i> ${escapeHTML(pet.breed)} &nbsp;|&nbsp;
+            <i class="fa-solid fa-venus-mars"></i> ${escapeHTML(pet.gender)} &nbsp;|&nbsp;
+            <i class="fa-solid fa-scale-balanced"></i> ${escapeHTML(pet.weight)} kg &nbsp;|&nbsp;
+            <i class="fa-solid fa-id-card"></i> ${escapeHTML(pet.pawTraceId)}
           </p>
         </div>
         <div class="detail-actions">
@@ -350,15 +350,15 @@ export async function renderPetDetail(params) {
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem;">
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">PET TYPE</span>
-                <strong>${pet.petType || 'Other'}</strong>
+                <strong>${escapeHTML(pet.petType || 'Other')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">BREED</span>
-                <strong>${pet.breed || 'Unknown'}</strong>
+                <strong>${escapeHTML(pet.breed || 'Unknown')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">GENDER</span>
-                <strong>${pet.gender || 'Unknown'}</strong>
+                <strong>${escapeHTML(pet.gender || 'Unknown')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">DATE OF BIRTH</span>
@@ -370,35 +370,35 @@ export async function renderPetDetail(params) {
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">WEIGHT</span>
-                <strong>${pet.weight ? pet.weight + ' kg' : 'N/A'}</strong>
+                <strong>${pet.weight ? escapeHTML(pet.weight) + ' kg' : 'N/A'}</strong>
               </div>
 
               ${pet.size ? `
                 <div>
                   <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">SIZE</span>
-                  <strong>${pet.size}</strong>
+                  <strong>${escapeHTML(pet.size)}</strong>
                 </div>
               ` : ''}
               ${pet.indoorOutdoor ? `
                 <div>
                   <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">ENVIRONMENT</span>
-                  <strong>${pet.indoorOutdoor}</strong>
+                  <strong>${escapeHTML(pet.indoorOutdoor)}</strong>
                 </div>
               ` : ''}
               ${pet.neutered ? `
                 <div>
                   <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">SPAYED / NEUTERED</span>
-                  <strong>${pet.neutered}</strong>
+                  <strong>${escapeHTML(pet.neutered)}</strong>
                 </div>
               ` : ''}
 
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">MICROCHIP ID</span>
-                <strong>${pet.microchipId || 'None'}</strong>
+                <strong>${escapeHTML(pet.microchipId) || 'None'}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">ADOPTION SOURCE</span>
-                <strong>${pet.adoptionSource || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.adoptionSource) || 'N/A'}</strong>
               </div>
               ${pet.registrationDate ? `
                 <div>
@@ -418,9 +418,9 @@ export async function renderPetDetail(params) {
               <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-glass); padding-top: 1.25rem;">
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase; margin-bottom:0.75rem;">Photos Gallery</span>
                 <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap:0.75rem;">
-                  ${pet.additionalPhotos.map(url => `
+                  ${pet.additionalPhotos.map((url) => `
                     <div style="aspect-ratio: 1; border-radius: var(--radius-sm); overflow:hidden; border: 1px solid var(--border-glass); box-shadow:var(--shadow-sm);">
-                      <img src="${url}" style="width:100%; height:100%; object-fit:cover; cursor:pointer;" onclick="window.open('${url}', '_blank')">
+                      <img src="${escapeHTML(url)}" data-photo-url="${escapeHTML(url)}" class="gallery-photo-open" style="width:100%; height:100%; object-fit:cover; cursor:pointer;">
                     </div>
                   `).join('')}
                 </div>
@@ -436,33 +436,33 @@ export async function renderPetDetail(params) {
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem;">
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">OWNER NAME</span>
-                <strong>${pet.ownerName || 'Ecosystem Owner'}</strong>
+                <strong>${escapeHTML(pet.ownerName || 'Ecosystem Owner')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">PRIMARY PHONE</span>
-                <strong>${pet.ownerPhone || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.ownerPhone || 'N/A')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">EMERGENCY CONTACT NAME</span>
-                <strong>${pet.emergencyContactName || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.emergencyContactName || 'N/A')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">EMERGENCY PHONE</span>
-                <strong>${pet.emergencyContact || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.emergencyContact || 'N/A')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">RELATIONSHIP</span>
-                <strong>${pet.relationship || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.relationship || 'N/A')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">OWNER EMAIL</span>
-                <strong>${pet.ownerContact || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.ownerContact || 'N/A')}</strong>
               </div>
             </div>
             ${pet.address ? `
               <div style="margin-top:1.25rem; border-top: 1px solid var(--border-glass); padding-top: 1rem;">
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">HOME ADDRESS</span>
-                <strong>${pet.address}${pet.city ? ', ' + pet.city : ''}${pet.state ? ', ' + pet.state : ''}${pet.postalCode ? ' - ' + pet.postalCode : ''}</strong>
+                <strong>${escapeHTML(pet.address)}${pet.city ? ', ' + escapeHTML(pet.city) : ''}${pet.state ? ', ' + escapeHTML(pet.state) : ''}${pet.postalCode ? ' - ' + escapeHTML(pet.postalCode) : ''}</strong>
               </div>
             ` : ''}
           </div>
@@ -475,33 +475,33 @@ export async function renderPetDetail(params) {
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem;">
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">VACCINATION STATUS</span>
-                <strong>${pet.vaccinationStatus || 'Unknown'}</strong>
+                <strong>${escapeHTML(pet.vaccinationStatus || 'Unknown')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">BLOOD TYPE</span>
-                <strong>${pet.bloodType || 'Unknown'}</strong>
+                <strong>${escapeHTML(pet.bloodType || 'Unknown')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">PET INSURANCE</span>
-                <strong>${pet.insurance || 'None'}</strong>
+                <strong>${escapeHTML(pet.insurance || 'None')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">KNOWN ALLERGIES</span>
-                <strong style="color:${pet.allergies ? 'var(--terracotta)' : 'inherit'};">${pet.allergies || 'None'}</strong>
+                <strong style="color:${pet.allergies ? 'var(--terracotta)' : 'inherit'};">${escapeHTML(pet.allergies || 'None')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">MEDICAL CONDITIONS</span>
-                <strong>${pet.conditions || 'None'}</strong>
+                <strong>${escapeHTML(pet.conditions || 'None')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">CURRENT MEDICATIONS</span>
-                <strong>${pet.medications || 'None'}</strong>
+                <strong>${escapeHTML(pet.medications || 'None')}</strong>
               </div>
             </div>
             ${pet.medicalNotes ? `
               <div style="margin-top:1.25rem; border-top: 1px solid var(--border-glass); padding-top: 1rem;">
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">CRITICAL MEDICAL NOTES</span>
-                <p style="font-size:0.9rem; line-height:1.5; margin-top:0.25rem;">${pet.medicalNotes}</p>
+                <p style="font-size:0.9rem; line-height:1.5; margin-top:0.25rem;">${escapeHTML(pet.medicalNotes)}</p>
               </div>
             ` : ''}
           </div>
@@ -514,35 +514,34 @@ export async function renderPetDetail(params) {
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem;">
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">DIET TYPE</span>
-                <strong>${pet.dietType || 'Kibble'}</strong>
+                <strong>${escapeHTML(pet.dietType || 'Kibble')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">FEEDING SCHEDULE</span>
-                <strong>${pet.feedingSchedule || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.feedingSchedule || 'N/A')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">ACTIVITY LEVEL</span>
-                <strong>${pet.activityLevel || 'Moderate'}</strong>
+                <strong>${escapeHTML(pet.activityLevel || 'Moderate')}</strong>
               </div>
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">TREATS ALLOWED</span>
-                <strong>${pet.treats || 'Yes'}</strong>
+                <strong>${escapeHTML(pet.treats || 'Yes')}</strong>
               </div>
             </div>
             ${pet.behaviorNotes ? `
               <div style="margin-top:1.25rem; border-top: 1px solid var(--border-glass); padding-top: 1rem;">
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">BEHAVIOR & SOCIALIZATION</span>
-                <p style="font-size:0.9rem; line-height:1.5; margin-top:0.25rem;">${pet.behaviorNotes}</p>
+                <p style="font-size:0.9rem; line-height:1.5; margin-top:0.25rem;">${escapeHTML(pet.behaviorNotes)}</p>
               </div>
             ` : ''}
             ${pet.trainingDetails ? `
               <div style="margin-top:1rem; border-top: 1px dashed var(--border-glass); padding-top: 1rem;">
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-transform:uppercase;">TRAINING DETAILS</span>
-                <p style="font-size:0.9rem; line-height:1.5; margin-top:0.25rem;">${pet.trainingDetails}</p>
+                <p style="font-size:0.9rem; line-height:1.5; margin-top:0.25rem;">${escapeHTML(pet.trainingDetails)}</p>
               </div>
             ` : ''}
           </div>
-
           <div id="caregiver-manager-section"></div>
           <div id="vet-sharing-section"></div>
 
@@ -559,19 +558,19 @@ export async function renderPetDetail(params) {
             <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1.25rem;">
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">RECOVERY CONTACT PHONE</span>
-                <strong>${pet.recoveryContact || pet.ownerPhone || pet.emergencyContact || 'N/A'}</strong>
+                <strong>${escapeHTML(pet.recoveryContact || pet.ownerPhone || pet.emergencyContact || 'N/A')}</strong>
               </div>
 
               ${pet.rewardAmount ? `
                 <div style="background:rgba(244, 208, 104, 0.15); padding:0.5rem 0.75rem; border-radius:var(--radius-sm); border:1px solid var(--accent-yellow);">
                   <span style="font-size:0.7rem; color:#856404; display:block; font-weight:600; text-transform:uppercase;">REWARD OFFERED</span>
-                  <strong style="color:#856404; font-size:1rem;">${pet.rewardAmount}</strong>
+                  <strong style="color:#856404; font-size:1rem;">${escapeHTML(pet.rewardAmount)}</strong>
                 </div>
               ` : ''}
 
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">FINDER SCAN INSTRUCTIONS</span>
-                <p style="font-size:0.8rem; line-height:1.4; margin-top:0.2rem;">${pet.recoveryInstructions || "Please keep safe and contact immediately. Pet is friendly but may be scared."}</p>
+                <p style="font-size:0.8rem; line-height:1.4; margin-top:0.2rem;">${escapeHTML(pet.recoveryInstructions || "Please keep safe and contact immediately. Pet is friendly but may be scared.")}</p>
               </div>
             </div>
 
@@ -586,7 +585,6 @@ export async function renderPetDetail(params) {
               <i class="fa-solid fa-user-lock" style="color:var(--teal); font-size:1.3rem;"></i>
               <h3 style="font-weight:700; font-family:'Outfit'; margin:0;">Privacy</h3>
             </div>
-
             <div style="display:flex; flex-direction:column; gap:0.65rem;">
               ${renderPrivacyIndicator('Owner Name', pet.privacy?.ownerName)}
               ${renderPrivacyIndicator('Phone Number', pet.privacy?.phoneNumber)}
@@ -656,7 +654,6 @@ export async function renderPetDetail(params) {
 
       </div>
     `;
-
     document.getElementById('btn-edit-pet').onclick = () => Router.navigate(`/pet/${pet.id}/edit`);
 
     const toggleHeaderBtn = document.getElementById('btn-toggle-lost-header');
@@ -670,6 +667,10 @@ export async function renderPetDetail(params) {
     } else if (!pet.tagOrderId) {
       document.getElementById('btn-order-tag').onclick = () => showOrderModal(pet.id, pet.name);
     }
+
+    document.querySelectorAll('.gallery-photo-open').forEach(img => {
+      img.onclick = () => window.open(img.getAttribute('data-photo-url'), '_blank');
+    });
 
     const cgContainer = document.getElementById('caregiver-manager-section');
     if (cgContainer) {
@@ -709,7 +710,6 @@ function generateQrTagCode(petId) {
       colorLight: "#ffffff",
       correctLevel: QRCode.CorrectLevel.H
     });
-
     const downloadBtn = document.getElementById('btn-download-tag');
     if (downloadBtn) {
       downloadBtn.onclick = () => {
@@ -768,7 +768,6 @@ async function togglePetLostStatus(pet) {
       message: notificationMessage,
       is_read: false
     });
-
     showToast(`Pet marked as ${targetStatus === 'LOST' ? 'Missing' : 'Found'}`, targetStatus === 'LOST' ? 'warning' : 'success');
     renderPetDetail({ id: pet.id });
   } catch (error) {
@@ -877,7 +876,6 @@ async function requestVetAccess(pet, email) {
     showLoading(false);
   }
 }
-
 async function revokeVetAccess(pet, accessId) {
   showLoading(true, "Revoking authorization...");
   try {
@@ -930,8 +928,8 @@ async function loadAuthorizedVetsList(pet, container) {
       item.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:0.5rem;">
           <div style="display:flex; flex-direction:column; gap:0.15rem; font-size:0.75rem;">
-            <strong style="color:var(--text-main);">${vet.display_name || "Clinic"}</strong>
-            <span style="color:var(--text-muted); font-size:0.7rem;">${clinicName} &bull; ${vet.email || ''}</span>
+            <strong style="color:var(--text-main);">${escapeHTML(vet.display_name || "Clinic")}</strong>
+            <span style="color:var(--text-muted); font-size:0.7rem;">${escapeHTML(clinicName)} &bull; ${escapeHTML(vet.email || '')}</span>
           </div>
           <button class="btn btn-secondary btn-revoke-vet" data-id="${grant.id}" style="font-size:0.65rem; padding:0.3rem 0.6rem; border-color:rgba(230,57,70,0.3); color:var(--accent-red); background:transparent;">
             Revoke Access
@@ -1043,12 +1041,12 @@ export async function renderLostPets() {
             <span class="pet-status-badge lost">MISSING</span>
           </div>
           <div class="pet-card-content">
-            <h4 class="pet-card-name">${pet.name}</h4>
+            <h4 class="pet-card-name">${escapeHTML(pet.name)}</h4>
             <div class="pet-card-meta" style="flex-direction: column; gap: 0.25rem;">
-              <span><strong>Breed:</strong> ${pet.breed || 'Unknown'}</span>
+              <span><strong>Breed:</strong> ${escapeHTML(pet.breed || 'Unknown')}</span>
               <span><strong>Age:</strong> ${calculateAge(pet.dob) || pet.age || 'N/A'}</span>
               <span style="color: var(--accent-red); margin-top: 0.25rem; font-weight:600;">
-                <i class="fa-solid fa-circle-exclamation"></i> Emergency Phone: ${pet.emergencyContact || 'N/A'}
+                <i class="fa-solid fa-circle-exclamation"></i> Emergency Phone: ${escapeHTML(pet.emergencyContact || 'N/A')}
               </span>
             </div>
             <div class="pet-card-actions">
@@ -1317,7 +1315,7 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-name">Pet Name *</label>
-            <input type="text" id="w-name" class="form-control" value="${wizardData.name}" required placeholder="E.g. Rex">
+            <input type="text" id="w-name" class="form-control" value="${escapeHTML(wizardData.name)}" required placeholder="E.g. Rex">
           </div>
           <div class="form-group">
             <label for="w-pet-type">Pet Type *</label>
@@ -1334,7 +1332,7 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-breed">Breed *</label>
-            <input type="text" id="w-breed" class="form-control" value="${wizardData.breed}" required placeholder="E.g. Golden Retriever">
+            <input type="text" id="w-breed" class="form-control" value="${escapeHTML(wizardData.breed)}" required placeholder="E.g. Golden Retriever">
           </div>
           <div class="form-group">
             <label for="w-gender">Gender *</label>
@@ -1349,24 +1347,24 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-dob">Date of Birth</label>
-            <input type="date" id="w-dob" class="form-control" value="${wizardData.dob}" max="${new Date().toISOString().split('T')[0]}">
+            <input type="date" id="w-dob" class="form-control" value="${escapeHTML(wizardData.dob)}" max="${new Date().toISOString().split('T')[0]}">
           </div>
           <div class="form-group">
             <label for="w-age">Approximate Age *</label>
-            <input type="text" id="w-age" class="form-control" value="${wizardData.age}" required placeholder="E.g. 2 years (auto-fills from DOB)">
+            <input type="text" id="w-age" class="form-control" value="${escapeHTML(wizardData.age)}" required placeholder="E.g. 2 years (auto-fills from DOB)">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-weight">Weight (kg) *</label>
-            <input type="number" step="0.1" id="w-weight" class="form-control" value="${wizardData.weight}" required placeholder="E.g. 12.5">
+            <input type="number" step="0.1" id="w-weight" class="form-control" value="${escapeHTML(wizardData.weight)}" required placeholder="E.g. 12.5">
           </div>
           <div class="form-group">
             <label>Profile Photo *</label>
             <div style="display:flex; gap:1.5rem; align-items:center;">
               <div class="profile-photo-upload-zone" id="w-photo-zone">
-                <img id="w-photo-preview" src="${wizardData.profileImage || ''}" alt="Preview" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="display: ${wizardData.profileImage ? 'block' : 'none'}; width:100%; height:100%; object-fit:cover;">
+                <img id="w-photo-preview" src="${escapeHTML(wizardData.profileImage || '')}" alt="Preview" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" style="display: ${wizardData.profileImage ? 'block' : 'none'}; width:100%; height:100%; object-fit:cover;">
                 <div class="pet-placeholder-card small" style="background: ${getPetPlaceholder(wizardData.petType, wizardData.name).background}; display: ${wizardData.profileImage ? 'none' : 'flex'};">
                   <span class="pet-placeholder-emoji">${getPetPlaceholder(wizardData.petType, wizardData.name).emoji}</span>
                 </div>
@@ -1378,9 +1376,6 @@ export async function renderPetRegisterWizard(params) {
               </div>
               <p style="font-size:0.75rem; color:var(--text-muted); line-height:1.4;">
                 Add a high quality photo of your pet to help identify them. Max file size: 3MB.
-              </p>
-    
-                <i class="fa-solid fa-triangle-exclamation"></i> File uploads are temporarily under maintenance and may not save reliably. We're updating this feature soon.
               </p>
             </div>
           </div>
@@ -1439,22 +1434,22 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-microchip">Microchip ID (Optional)</label>
-            <input type="text" id="w-microchip" class="form-control" value="${wizardData.microchipId}" placeholder="Enter microchip tag code">
+            <input type="text" id="w-microchip" class="form-control" value="${escapeHTML(wizardData.microchipId)}" placeholder="Enter microchip tag code">
           </div>
           <div class="form-group">
             <label for="w-adoption-source">Adoption Source (Optional)</label>
-            <input type="text" id="w-adoption-source" class="form-control" value="${wizardData.adoptionSource}" placeholder="E.g. Shelter Name, Breeder, Rescue">
+            <input type="text" id="w-adoption-source" class="form-control" value="${escapeHTML(wizardData.adoptionSource)}" placeholder="E.g. Shelter Name, Breeder, Rescue">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-reg-date">Registration Date (Optional)</label>
-            <input type="date" id="w-reg-date" class="form-control" value="${wizardData.registrationDate}">
+            <input type="date" id="w-reg-date" class="form-control" value="${escapeHTML(wizardData.registrationDate)}">
           </div>
           <div class="form-group">
             <label for="w-adopt-date">Adoption Date (Optional)</label>
-            <input type="date" id="w-adopt-date" class="form-control" value="${wizardData.adoptionDate}">
+            <input type="date" id="w-adopt-date" class="form-control" value="${escapeHTML(wizardData.adoptionDate)}">
           </div>
         </div>
       `;
@@ -1464,48 +1459,48 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-owner-name">Owner Name *</label>
-            <input type="text" id="w-owner-name" class="form-control" value="${wizardData.ownerName}" required placeholder="Full Name">
+            <input type="text" id="w-owner-name" class="form-control" value="${escapeHTML(wizardData.ownerName)}" required placeholder="Full Name">
           </div>
           <div class="form-group">
             <label for="w-owner-phone">Primary Phone Number *</label>
-            <input type="tel" id="w-owner-phone" class="form-control" value="${wizardData.ownerPhone}" required placeholder="+1 (555) 123-4567">
+            <input type="tel" id="w-owner-phone" class="form-control" value="${escapeHTML(wizardData.ownerPhone)}" required placeholder="+1 (555) 123-4567">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-emg-name">Emergency Contact Name *</label>
-            <input type="text" id="w-emg-name" class="form-control" value="${wizardData.emergencyContactName}" required placeholder="Emergency Contact Name">
+            <input type="text" id="w-emg-name" class="form-control" value="${escapeHTML(wizardData.emergencyContactName)}" required placeholder="Emergency Contact Name">
           </div>
           <div class="form-group">
             <label for="w-emg-phone">Emergency Contact Number *</label>
-            <input type="tel" id="w-emg-phone" class="form-control" value="${wizardData.emergencyContact}" required placeholder="+1 (555) 987-6543">
+            <input type="tel" id="w-emg-phone" class="form-control" value="${escapeHTML(wizardData.emergencyContact)}" required placeholder="+1 (555) 987-6543">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-relationship">Relationship to Pet (Optional)</label>
-            <input type="text" id="w-relationship" class="form-control" value="${wizardData.relationship}" placeholder="E.g. Parent, Sibling, Friend">
+            <input type="text" id="w-relationship" class="form-control" value="${escapeHTML(wizardData.relationship)}" placeholder="E.g. Parent, Sibling, Friend">
           </div>
           <div class="form-group">
             <label for="w-address">Street Address (Optional)</label>
-            <input type="text" id="w-address" class="form-control" value="${wizardData.address}" placeholder="House No, Street name">
+            <input type="text" id="w-address" class="form-control" value="${escapeHTML(wizardData.address)}" placeholder="House No, Street name">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-city">City (Optional)</label>
-            <input type="text" id="w-city" class="form-control" value="${wizardData.city}" placeholder="City">
+            <input type="text" id="w-city" class="form-control" value="${escapeHTML(wizardData.city)}" placeholder="City">
           </div>
           <div class="form-group">
             <label for="w-state">State (Optional)</label>
-            <input type="text" id="w-state" class="form-control" value="${wizardData.state}" placeholder="State">
+            <input type="text" id="w-state" class="form-control" value="${escapeHTML(wizardData.state)}" placeholder="State">
           </div>
           <div class="form-group">
             <label for="w-zip">Postal Code (Optional)</label>
-            <input type="text" id="w-zip" class="form-control" value="${wizardData.postalCode}" placeholder="Zip Code">
+            <input type="text" id="w-zip" class="form-control" value="${escapeHTML(wizardData.postalCode)}" placeholder="Zip Code">
           </div>
         </div>
       `;
@@ -1515,11 +1510,11 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-blood">Blood Type (Optional)</label>
-            <input type="text" id="w-blood" class="form-control" value="${wizardData.bloodType}" placeholder="E.g. DEA 1.1+, A, B, etc.">
+            <input type="text" id="w-blood" class="form-control" value="${escapeHTML(wizardData.bloodType)}" placeholder="E.g. DEA 1.1+, A, B, etc.">
           </div>
           <div class="form-group">
             <label for="w-insurance">Pet Insurance Provider/Policy (Optional)</label>
-            <input type="text" id="w-insurance" class="form-control" value="${wizardData.insurance}" placeholder="E.g. Healthy Paws, Policy #12345">
+            <input type="text" id="w-insurance" class="form-control" value="${escapeHTML(wizardData.insurance)}" placeholder="E.g. Healthy Paws, Policy #12345">
           </div>
         </div>
 
@@ -1534,24 +1529,24 @@ export async function renderPetRegisterWizard(params) {
           </div>
           <div class="form-group">
             <label for="w-allergies">Known Allergies (Optional)</label>
-            <input type="text" id="w-allergies" class="form-control" value="${wizardData.allergies}" placeholder="E.g. Chicken, Penicillin, Dust mites">
+            <input type="text" id="w-allergies" class="form-control" value="${escapeHTML(wizardData.allergies)}" placeholder="E.g. Chicken, Penicillin, Dust mites">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-conditions">Existing Medical Conditions (Optional)</label>
-            <input type="text" id="w-conditions" class="form-control" value="${wizardData.conditions}" placeholder="E.g. Diabetes, Arthritis, none">
+            <input type="text" id="w-conditions" class="form-control" value="${escapeHTML(wizardData.conditions)}" placeholder="E.g. Diabetes, Arthritis, none">
           </div>
           <div class="form-group">
             <label for="w-medications">Current Medications (Optional)</label>
-            <input type="text" id="w-medications" class="form-control" value="${wizardData.medications}" placeholder="E.g. Insulin daily, Joint chews">
+            <input type="text" id="w-medications" class="form-control" value="${escapeHTML(wizardData.medications)}" placeholder="E.g. Insulin daily, Joint chews">
           </div>
         </div>
 
         <div class="form-group">
           <label for="w-medical-notes">Critical Medical / Healthcare Notes (Optional)</label>
-          <textarea id="w-medical-notes" class="form-control" rows="3" placeholder="Any additional healthcare directives or clinical history details...">${wizardData.medicalNotes}</textarea>
+          <textarea id="w-medical-notes" class="form-control" rows="3" placeholder="Any additional healthcare directives or clinical history details...">${escapeHTML(wizardData.medicalNotes)}</textarea>
         </div>
       `;
     } else if (currentStep === 5) {
@@ -1570,7 +1565,7 @@ export async function renderPetRegisterWizard(params) {
           </div>
           <div class="form-group">
             <label for="w-feeding">Feeding Schedule (Optional)</label>
-            <input type="text" id="w-feeding" class="form-control" value="${wizardData.feedingSchedule}" placeholder="E.g. Twice daily at 8am & 6pm">
+            <input type="text" id="w-feeding" class="form-control" value="${escapeHTML(wizardData.feedingSchedule)}" placeholder="E.g. Twice daily at 8am & 6pm">
           </div>
         </div>
 
@@ -1586,18 +1581,18 @@ export async function renderPetRegisterWizard(params) {
           </div>
           <div class="form-group">
             <label for="w-treats">Treats Allowed / Details (Optional)</label>
-            <input type="text" id="w-treats" class="form-control" value="${wizardData.treats}" placeholder="E.g. Salmon skin, freeze-dried liver">
+            <input type="text" id="w-treats" class="form-control" value="${escapeHTML(wizardData.treats)}" placeholder="E.g. Salmon skin, freeze-dried liver">
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label for="w-behavior">Behavior & Social Notes (Optional)</label>
-            <textarea id="w-behavior" class="form-control" rows="2" placeholder="E.g. Super friendly, nervous around loud trucks, barks at postman...">${wizardData.behaviorNotes}</textarea>
+            <textarea id="w-behavior" class="form-control" rows="2" placeholder="E.g. Super friendly, nervous around loud trucks, barks at postman...">${escapeHTML(wizardData.behaviorNotes)}</textarea>
           </div>
           <div class="form-group">
             <label for="w-training">Training & Skill Details (Optional)</label>
-            <textarea id="w-training" class="form-control" rows="2" placeholder="E.g. Basic obedience, crate trained, service dog certified...">${wizardData.trainingDetails}</textarea>
+            <textarea id="w-training" class="form-control" rows="2" placeholder="E.g. Basic obedience, crate trained, service dog certified...">${escapeHTML(wizardData.trainingDetails)}</textarea>
           </div>
         </div>
 
@@ -1608,9 +1603,6 @@ export async function renderPetRegisterWizard(params) {
             <p style="font-size:0.85rem; color:var(--text-muted);">Click to upload additional photos of your pet</p>
             <input type="file" id="w-gallery-files" style="display:none;" accept="image/*" multiple>
           </div>
-          <p style="font-size:0.75rem; color:#e09f3e; margin-top:0.35rem; display:flex; align-items:center; gap:0.35rem;">
-            <i class="fa-solid fa-triangle-exclamation"></i> File uploads are temporarily under maintenance and may not save reliably. We're updating this feature soon.
-          </p>
           <div id="w-gallery-previews" class="gallery-previews-grid"></div>
         </div>
       `;
@@ -1652,17 +1644,17 @@ export async function renderPetRegisterWizard(params) {
         <div class="form-row">
           <div class="form-group">
             <label for="w-rec-contact">Recovery Contact Phone Number *</label>
-            <input type="tel" id="w-rec-contact" class="form-control" value="${recContact}" required placeholder="Phone number to call if lost">
+            <input type="tel" id="w-rec-contact" class="form-control" value="${escapeHTML(recContact)}" required placeholder="Phone number to call if lost">
           </div>
           <div class="form-group">
             <label for="w-reward">Reward Offered (Optional)</label>
-            <input type="text" id="w-reward" class="form-control" value="${wizardData.rewardAmount}" placeholder="E.g. ₹5,000 or $500">
+            <input type="text" id="w-reward" class="form-control" value="${escapeHTML(wizardData.rewardAmount)}" placeholder="E.g. ₹5,000 or $500">
           </div>
         </div>
 
         <div class="form-group">
           <label for="w-rec-instructions">Recovery / Scanning Instructions *</label>
-          <textarea id="w-rec-instructions" class="form-control" rows="3" required placeholder="Instructions shown to a finder who scans the collar tag...">${recInstructions}</textarea>
+          <textarea id="w-rec-instructions" class="form-control" rows="3" required placeholder="Instructions shown to a finder who scans the collar tag...">${escapeHTML(recInstructions)}</textarea>
         </div>
       `;
     } else if (currentStep === 7) {
@@ -1825,7 +1817,7 @@ export async function renderPetRegisterWizard(params) {
       const item = document.createElement('div');
       item.className = 'gallery-preview-item';
       item.innerHTML = `
-        <img src="${img}" alt="Preview ${idx + 1}">
+        <img src="${escapeHTML(img)}" alt="Preview ${idx + 1}">
         <button type="button" class="delete-btn" data-index="${idx}">
           <i class="fa-solid fa-xmark"></i>
         </button>
