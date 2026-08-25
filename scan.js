@@ -1,9 +1,10 @@
 // ==========================================================================
-// PUBLIC RECOVERY SCAN MODULE (Supabase)
-// ==========================================================================
+ // PUBLIC RECOVERY SCAN MODULE (Supabase)
+ // ==========================================================================
 
 import { supabase } from './supabase-config.js';
 import { getCurrentLocation, getGoogleMapsLink, showToast, showLoading, formatFriendlyDate, getPetImageHTML, escapeHTML, sanitizePhoneForHref } from './utils.js';
+
 /**
  * Renders the public scanning route page
  * E.g. #/scan/:id
@@ -15,8 +16,13 @@ export async function renderScanPage(params) {
   if (titleEl) titleEl.textContent = 'Smart Recovery Tag';
 
   showLoading(true, "Resolving PawTrace identity...");
+
   try {
-    const { data: rawPet, error } = await supabase.from('pets').select('*').eq('id', petId).single();
+    const { data: rawPet, error } = await supabase
+      .from('pets')
+      .select('*')
+      .eq('id', petId)
+      .single();
 
     if (error || !rawPet) {
       viewport.innerHTML = `
@@ -50,93 +56,113 @@ export async function renderScanPage(params) {
 
     const isLost = rawPet.is_lost === true;
 
-    const privacy = rawPet.privacy && Object.keys(rawPet.privacy).length > 0 ? rawPet.privacy : {
-      ownerName: true,
-      phoneNumber: true,
-      emergencyContact: true,
-      address: true,
-      medicalInfo: true,
-      vaccinationStatus: true,
-      breed: true,
-      microchipId: true
-    };
+    const privacy = rawPet.privacy && Object.keys(rawPet.privacy).length > 0
+      ? rawPet.privacy
+      : {
+          ownerName: true,
+          phoneNumber: true,
+          emergencyContact: true,
+          address: true,
+          medicalInfo: true,
+          vaccinationStatus: true,
+          breed: true,
+          microchipId: true
+        };
 
+    // Sanitize all database/user-controlled values before they are
+    // interpolated into HTML below.
     const safePet = {
-  id: rawPet.id,
-  name: escapeHTML(rawPet.name),
-  petType: escapeHTML(rawPet.species),
-  breed: (isLost || privacy.breed !== false)
-    ? escapeHTML(rawPet.breed)
-    : null,
-  gender: escapeHTML(rawPet.gender),
-  profileImage: escapeHTML(rawPet.photo_url),
-  pawTraceId: escapeHTML(rawPet.pawtrace_id),
-  lostStatus: 'LOST',
-  ownerId: rawPet.owner_id,
+      id: rawPet.id,
 
-  microchipId: (isLost || privacy.microchipId !== false)
-    ? escapeHTML(rawPet.microchip_id)
-    : null,
+      name: escapeHTML(rawPet.name),
 
-  ownerName: (isLost || privacy.ownerName !== false)
-    ? escapeHTML(rawPet.owner_name || "Ecosystem Owner")
-    : null,
+      petType: escapeHTML(rawPet.species),
 
-  ownerPhone: (isLost || privacy.phoneNumber !== false)
-    ? escapeHTML(
+      breed: (isLost || privacy.breed !== false)
+        ? escapeHTML(rawPet.breed)
+        : null,
+
+      gender: escapeHTML(rawPet.gender),
+
+      profileImage: escapeHTML(rawPet.photo_url),
+
+      pawTraceId: escapeHTML(rawPet.pawtrace_id),
+
+      lostStatus: isLost ? 'LOST' : 'SAFE',
+
+      ownerId: rawPet.owner_id,
+
+      microchipId: (isLost || privacy.microchipId !== false)
+        ? escapeHTML(rawPet.microchip_id)
+        : null,
+
+      ownerName: (isLost || privacy.ownerName !== false)
+        ? escapeHTML(rawPet.owner_name || "Ecosystem Owner")
+        : null,
+
+      ownerPhone: (isLost || privacy.phoneNumber !== false)
+        ? escapeHTML(
+            rawPet.recovery_contact ||
+            rawPet.owner_phone ||
+            rawPet.emergency_contact
+          )
+        : null,
+
+      emergencyContact: (isLost || privacy.emergencyContact !== false)
+        ? escapeHTML(rawPet.emergency_contact)
+        : null,
+
+      address: (isLost || privacy.address !== false)
+        ? (
+            rawPet.address
+              ? escapeHTML(
+                  `${rawPet.address}${
+                    rawPet.city ? ', ' + rawPet.city : ''
+                  }${
+                    rawPet.state ? ', ' + rawPet.state : ''
+                  }`
+                )
+              : null
+          )
+        : null,
+
+      medicalNotes: (isLost || privacy.medicalInfo !== false)
+        ? escapeHTML(
+            rawPet.medical_notes ||
+            rawPet.allergies ||
+            rawPet.conditions
+          )
+        : null,
+
+      vaccinationStatus: (isLost || privacy.vaccinationStatus !== false)
+        ? escapeHTML(rawPet.vaccination_status)
+        : null,
+
+      recoveryContact: escapeHTML(
         rawPet.recovery_contact ||
         rawPet.owner_phone ||
         rawPet.emergency_contact
-      )
-    : null,
+      ),
 
-  emergencyContact: (isLost || privacy.emergencyContact !== false)
-    ? escapeHTML(rawPet.emergency_contact)
-    : null,
+      recoveryInstructions: escapeHTML(rawPet.recovery_instructions),
 
-  address: (isLost || privacy.address !== false)
-    ? (
-        rawPet.address
-          ? escapeHTML(
-              `${rawPet.address}${
-                rawPet.city ? ', ' + rawPet.city : ''
-              }${
-                rawPet.state ? ', ' + rawPet.state : ''
-              }`
-            )
-          : null
-      )
-    : null,
+      rewardAmount: escapeHTML(rawPet.reward_amount)
+    };
 
-  medicalNotes: (isLost || privacy.medicalInfo !== false)
-    ? escapeHTML(
-        rawPet.medical_notes ||
-        rawPet.allergies ||
-        rawPet.conditions
-      )
-    : null,
+    // FIX (XSS/URI safety):
+    // tel: hrefs must not reuse arbitrary user-controlled strings.
+    // sanitizePhoneForHref() reduces the raw phone value to safe
+    // telephone characters before inserting it into the href.
+    const telRecovery = sanitizePhoneForHref(
+      rawPet.recovery_contact ||
+      rawPet.owner_phone ||
+      rawPet.emergency_contact
+    );
 
-  vaccinationStatus: (isLost || privacy.vaccinationStatus !== false)
-    ? escapeHTML(rawPet.vaccination_status)
-    : null,
-
-  recoveryContact: escapeHTML(
-    rawPet.recovery_contact ||
-    rawPet.owner_phone ||
-    rawPet.emergency_contact
-  ),
-
-  recoveryInstructions: escapeHTML(rawPet.recovery_instructions),
-
-  rewardAmount: escapeHTML(rawPet.reward_amount)
-};
-
-    // FIX (XSS): tel: hrefs must not simply reuse the already-escaped
-    // display text — escapeHTML() prevents markup breakout but does not
-    // validate URI schemes. sanitizePhoneForHref() strips the raw phone
-    // value down to digits/+/-/()/space before it's placed in href="tel:...".
-    const telRecovery = sanitizePhoneForHref(rawPet.recovery_contact || rawPet.owner_phone || rawPet.emergency_contact);
-    const telOwner = sanitizePhoneForHref(rawPet.owner_phone || rawPet.emergency_contact);
+    const telOwner = sanitizePhoneForHref(
+      rawPet.owner_phone ||
+      rawPet.emergency_contact
+    );
 
     viewport.innerHTML = `
       <div class="auth-wrapper" style="min-height: calc(100vh - 70px); padding: 1rem 0;">
@@ -167,16 +193,27 @@ export async function renderScanPage(params) {
 
           <div style="display:flex; flex-direction:column; align-items:center; text-align:center; gap:1rem;">
             <div style="width:120px; height:120px; border-radius: var(--radius-md); overflow:hidden; border: 3px solid ${isLost ? 'var(--accent-red)' : 'var(--teal)'}; position: relative;">
-              ${getPetImageHTML({ name: rawPet.name, petType: rawPet.species, profileImage: rawPet.photo_url }, 'large')}
+              ${getPetImageHTML(
+                {
+                  name: safePet.name,
+                  petType: safePet.petType,
+                  profileImage: safePet.profileImage
+                },
+                'large'
+              )}
             </div>
 
             <div>
               <h2 style="font-family:'Outfit', sans-serif; font-size:1.8rem; font-weight:800; margin-bottom:0.25rem;">
                 ${safePet.name}
               </h2>
+
               <p style="font-size:0.85rem; color:var(--text-muted);">
-                Breed: <strong>${safePet.breed || 'Hidden/Unknown'}</strong> &bull; Gender: <strong>${safePet.gender || 'Unknown'}</strong>
+                Breed: <strong>${safePet.breed || 'Hidden/Unknown'}</strong>
+                &bull;
+                Gender: <strong>${safePet.gender || 'Unknown'}</strong>
               </p>
+
               ${safePet.microchipId ? `
                 <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">
                   Microchip ID: <strong>${safePet.microchipId}</strong>
@@ -191,58 +228,109 @@ export async function renderScanPage(params) {
 
             ${isLost ? `
               <div>
-                <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">RECOVERY CONTACT NUMBER</span>
-                <a href="tel:${telRecovery}" class="btn btn-primary btn-full" style="margin-top:0.35rem; padding:0.6rem 0.85rem; background:var(--teal); border:none; display: flex; flex-direction: column; gap: 0.15rem; align-items: center; justify-content: center; height: auto;">
-                  <span style="font-size: 0.8rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone-flip fa-shake"></i> Call Recovery Contact</span>
-                  <span style="font-size: 1.05rem; font-weight: 800;">${safePet.recoveryContact || safePet.ownerPhone}</span>
+                <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">
+                  RECOVERY CONTACT NUMBER
+                </span>
+
+                <a
+                  href="tel:${telRecovery}"
+                  class="btn btn-primary btn-full"
+                  style="margin-top:0.35rem; padding:0.6rem 0.85rem; background:var(--teal); border:none; display:flex; flex-direction:column; gap:0.15rem; align-items:center; justify-content:center; height:auto;"
+                >
+                  <span style="font-size:0.8rem; font-weight:500; display:inline-flex; align-items:center; gap:0.35rem;">
+                    <i class="fa-solid fa-phone-flip fa-shake"></i>
+                    Call Recovery Contact
+                  </span>
+
+                  <span style="font-size:1.05rem; font-weight:800;">
+                    ${safePet.recoveryContact || safePet.ownerPhone}
+                  </span>
                 </a>
               </div>
 
               ${safePet.recoveryInstructions ? `
-                <div class="glass-card" style="padding:1rem; background:rgba(31, 122, 140, 0.04); border-color: rgba(31, 122, 140, 0.2);">
+                <div class="glass-card" style="padding:1rem; background:rgba(31, 122, 140, 0.04); border-color:rgba(31, 122, 140, 0.2);">
                   <strong style="color:var(--teal); font-size:0.85rem; display:block; margin-bottom:0.25rem;">
-                    <i class="fa-solid fa-hand-holding-heart"></i> Recovery Instructions
+                    <i class="fa-solid fa-hand-holding-heart"></i>
+                    Recovery Instructions
                   </strong>
-                  <p style="font-size:0.8rem; line-height:1.4;">${safePet.recoveryInstructions}</p>
+
+                  <p style="font-size:0.8rem; line-height:1.4;">
+                    ${safePet.recoveryInstructions}
+                  </p>
                 </div>
               ` : ''}
 
               ${safePet.ownerName ? `
                 <div>
-                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">OWNER NAME</span>
-                  <strong style="font-size:0.9rem;">${safePet.ownerName}</strong>
+                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">
+                    OWNER NAME
+                  </span>
+
+                  <strong style="font-size:0.9rem;">
+                    ${safePet.ownerName}
+                  </strong>
                 </div>
               ` : ''}
 
               ${safePet.address ? `
                 <div>
-                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">LAST KNOWN ADDRESS / AREA</span>
-                  <strong style="font-size:0.9rem;">${safePet.address}</strong>
+                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">
+                    LAST KNOWN ADDRESS / AREA
+                  </span>
+
+                  <strong style="font-size:0.9rem;">
+                    ${safePet.address}
+                  </strong>
                 </div>
               ` : ''}
 
             ` : (safePet.ownerPhone || safePet.emergencyContact) ? `
               <div>
-                <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">PRIMARY EMERGENCY PHONE</span>
-                <a href="tel:${telOwner}" class="btn btn-secondary btn-full" style="margin-top:0.35rem; padding:0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.15rem; align-items: center; justify-content: center; height: auto;">
-                  <span style="font-size: 0.8rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone-flip"></i> Call Owner</span>
-                  <span style="font-size: 1rem; font-weight: 800;">${safePet.ownerPhone || safePet.emergencyContact}</span>
+                <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">
+                  PRIMARY EMERGENCY PHONE
+                </span>
+
+                <a
+                  href="tel:${telOwner}"
+                  class="btn btn-secondary btn-full"
+                  style="margin-top:0.35rem; padding:0.6rem 0.85rem; display:flex; flex-direction:column; gap:0.15rem; align-items:center; justify-content:center; height:auto;"
+                >
+                  <span style="font-size:0.8rem; font-weight:500; display:inline-flex; align-items:center; gap:0.35rem;">
+                    <i class="fa-solid fa-phone-flip"></i>
+                    Call Owner
+                  </span>
+
+                  <span style="font-size:1rem; font-weight:800;">
+                    ${safePet.ownerPhone || safePet.emergencyContact}
+                  </span>
                 </a>
               </div>
 
               ${safePet.ownerName ? `
                 <div>
-                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">OWNER NAME</span>
-                  <strong style="font-size:0.9rem;">${safePet.ownerName}</strong>
+                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">
+                    OWNER NAME
+                  </span>
+
+                  <strong style="font-size:0.9rem;">
+                    ${safePet.ownerName}
+                  </strong>
                 </div>
               ` : ''}
 
               ${safePet.address ? `
                 <div>
-                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">HOME ADDRESS</span>
-                  <strong style="font-size:0.9rem;">${safePet.address}</strong>
+                  <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">
+                    HOME ADDRESS
+                  </span>
+
+                  <strong style="font-size:0.9rem;">
+                    ${safePet.address}
+                  </strong>
                 </div>
               ` : ''}
+
             ` : `
               <div style="text-align:center; padding:1rem; background:rgba(0,0,0,0.02); border-radius:var(--radius-sm); border:1px dashed var(--border-glass);">
                 <p style="font-size:0.85rem; color:var(--text-muted);">
@@ -252,17 +340,25 @@ export async function renderScanPage(params) {
             `}
 
             ${safePet.medicalNotes ? `
-              <div class="glass-card" style="padding:1rem; background:rgba(217, 93, 57, 0.04); border-color: rgba(217, 93, 57, 0.2);">
+              <div class="glass-card" style="padding:1rem; background:rgba(217, 93, 57, 0.04); border-color:rgba(217, 93, 57, 0.2);">
                 <strong style="color:var(--terracotta); font-size:0.85rem; display:block; margin-bottom:0.25rem;">
-                  <i class="fa-solid fa-circle-info"></i> Critical Health Directives
+                  <i class="fa-solid fa-circle-info"></i>
+                  Critical Health Directives
                 </strong>
-                <p style="font-size:0.8rem; line-height:1.4;">${safePet.medicalNotes}</p>
+
+                <p style="font-size:0.8rem; line-height:1.4;">
+                  ${safePet.medicalNotes}
+                </p>
               </div>
             ` : ''}
 
             <div id="gps-status-panel" class="geo-panel" style="margin-top:0.5rem; text-align:center;">
               <i class="fa-solid fa-location-arrow fa-pulse" style="color:var(--terracotta); font-size:1.5rem; margin-bottom:0.5rem;"></i>
-              <strong>Attempting to locate tag GPS...</strong>
+
+              <strong>
+                Attempting to locate tag GPS...
+              </strong>
+
               <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem;">
                 Please allow browser geolocation prompts to send location updates to owner.
               </p>
@@ -282,19 +378,27 @@ export async function renderScanPage(params) {
 
   } catch (error) {
     console.error("Scan Resolving Error:", error);
+
     viewport.innerHTML = `
       <div class="auth-wrapper">
-        <div class="glass-card" style="text-align:center; max-width: 450px;">
+        <div class="glass-card" style="text-align:center; max-width:450px;">
           <i class="fa-solid fa-lock" style="font-size:3rem; color:var(--accent-red); margin-bottom:1rem;"></i>
+
           <h2>Identity Access Restricted</h2>
-          <p style="color:var(--text-muted); font-size:0.9rem; margin-top:0.5rem; line-height: 1.4;">
+
+          <p style="color:var(--text-muted); font-size:0.9rem; margin-top:0.5rem; line-height:1.4;">
             This companion profile is marked private or could not be loaded. Contact details will become visible if the owner updates the status to LOST.
           </p>
-          <a href="#/login" class="btn btn-primary mt-2">Go to Homepage</a>
+
+          <a href="#/login" class="btn btn-primary mt-2">
+            Go to Homepage
+          </a>
         </div>
       </div>
     `;
+
     showToast("Failed to retrieve profile record.", "warning");
+
   } finally {
     showLoading(false);
   }
@@ -311,17 +415,27 @@ async function attemptAutomaticScanLogging(pet) {
   const lastScanTime = sessionStorage.getItem(sessionKey);
   const now = Date.now();
 
-  if (lastScanTime && (now - parseInt(lastScanTime)) < 5 * 60 * 1000) {
+  if (
+    lastScanTime &&
+    (now - parseInt(lastScanTime)) < 5 * 60 * 1000
+  ) {
     console.log("Scan rate-limited. Notification skipped.");
+
     panel.style.background = 'rgba(82, 183, 136, 0.08)';
     panel.style.borderColor = 'var(--accent-green)';
+
     panel.innerHTML = `
       <i class="fa-solid fa-circle-check" style="color:var(--accent-green); font-size:1.5rem; margin-bottom:0.5rem;"></i>
-      <strong style="color:var(--accent-green);">Coordinates Logged Recently</strong>
+
+      <strong style="color:var(--accent-green);">
+        Coordinates Logged Recently
+      </strong>
+
       <p style="font-size:0.75rem; margin-top:0.2rem;">
-        Your location coordinates were already sent to ${pet.name}'s owner recently.
+        Your location coordinates were already sent to ${escapeHTML(pet.name)}'s owner recently.
       </p>
     `;
+
     return;
   }
 
@@ -329,6 +443,7 @@ async function attemptAutomaticScanLogging(pet) {
 
   try {
     const position = await getCurrentLocation();
+
     const lat = position.latitude;
     const lng = position.longitude;
     const mapsLink = getGoogleMapsLink(lat, lng);
@@ -337,13 +452,19 @@ async function attemptAutomaticScanLogging(pet) {
 
     panel.style.background = 'rgba(82, 183, 136, 0.08)';
     panel.style.borderColor = 'var(--accent-green)';
+
     panel.innerHTML = `
       <i class="fa-solid fa-circle-check" style="color:var(--accent-green); font-size:1.5rem; margin-bottom:0.5rem;"></i>
-      <strong style="color:var(--accent-green);">GPS Coordinates Logged!</strong>
+
+      <strong style="color:var(--accent-green);">
+        GPS Coordinates Logged!
+      </strong>
+
       <p style="font-size:0.75rem; margin-top:0.2rem;">
-        Your coordinate location has been securely forwarded to ${pet.name}'s owner. Thank you for your assistance.
+        Your coordinate location has been securely forwarded to ${escapeHTML(pet.name)}'s owner. Thank you for your assistance.
       </p>
     `;
+
     showToast("GPS location successfully forwarded.", "success");
 
   } catch (err) {
@@ -353,25 +474,42 @@ async function attemptAutomaticScanLogging(pet) {
 
     panel.style.background = 'rgba(230, 57, 70, 0.05)';
     panel.style.borderColor = 'rgba(230, 57, 70, 0.15)';
+
     panel.innerHTML = `
       <i class="fa-solid fa-triangle-exclamation" style="color:var(--accent-red); font-size:1.5rem; margin-bottom:0.5rem;"></i>
-      <strong style="color:var(--accent-red);">Location Permission Denied</strong>
-      <p style="font-size:0.75rem; margin-top:0.2rem; line-height: 1.3;">
+
+      <strong style="color:var(--accent-red);">
+        Location Permission Denied
+      </strong>
+
+      <p style="font-size:0.75rem; margin-top:0.2rem; line-height:1.3;">
         Scan alert sent, but could not capture coordinate details. If you have the pet, please contact the owner via phone above.
       </p>
-      <button id="btn-retry-gps" class="btn btn-outline" style="font-size: 0.7rem; padding:0.35rem 0.75rem; margin-top: 0.5rem; width:fit-content;">
-        <i class="fa-solid fa-location-crosshairs"></i> Retry Location
+
+      <button
+        id="btn-retry-gps"
+        class="btn btn-outline"
+        style="font-size:0.7rem; padding:0.35rem 0.75rem; margin-top:0.5rem; width:fit-content;"
+      >
+        <i class="fa-solid fa-location-crosshairs"></i>
+        Retry Location
       </button>
     `;
 
     const retryBtn = document.getElementById('btn-retry-gps');
+
     if (retryBtn) {
       retryBtn.onclick = () => {
         sessionStorage.removeItem(sessionKey);
+
         panel.innerHTML = `
           <i class="fa-solid fa-location-arrow fa-pulse" style="color:var(--terracotta); font-size:1.5rem; margin-bottom:0.5rem;"></i>
-          <strong>Retrying location capture...</strong>
+
+          <strong>
+            Retrying location capture...
+          </strong>
         `;
+
         attemptAutomaticScanLogging(pet);
       };
     }
@@ -383,26 +521,36 @@ async function attemptAutomaticScanLogging(pet) {
  */
 async function saveScanAndNotify(pet, lat, lng, mapsLink) {
   try {
-    const { error: scanErr } = await supabase.from('scans').insert({
-      pet_id: pet.id,
-      latitude: lat,
-      longitude: lng,
-      maps_link: mapsLink
-    });
-    if (scanErr) console.error("Failed to save scan record:", scanErr);
+    const { error: scanErr } = await supabase
+      .from('scans')
+      .insert({
+        pet_id: pet.id,
+        latitude: lat,
+        longitude: lng,
+        maps_link: mapsLink
+      });
+
+    if (scanErr) {
+      console.error("Failed to save scan record:", scanErr);
+    }
 
     const message = lat
       ? `QR code for ${pet.name} was scanned! Location coordinates recorded: Lat ${lat.toFixed(5)}, Lng ${lng.toFixed(5)}.`
       : `QR code for ${pet.name} was scanned, but location permission was denied.`;
 
-    const { error: notifErr } = await supabase.from('notifications').insert({
-      user_id: pet.ownerId,
-      type: 'QR_SCAN',
-      message: message,
-      maps_link: mapsLink,
-      is_read: false
-    });
-    if (notifErr) console.error("Failed to save scan notification:", notifErr);
+    const { error: notifErr } = await supabase
+      .from('notifications')
+      .insert({
+        user_id: pet.ownerId,
+        type: 'QR_SCAN',
+        message: message,
+        maps_link: mapsLink,
+        is_read: false
+      });
+
+    if (notifErr) {
+      console.error("Failed to save scan notification:", notifErr);
+    }
 
   } catch (err) {
     console.error("Failed to log scan:", err);
