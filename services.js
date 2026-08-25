@@ -42,12 +42,14 @@ export async function renderServices() {
     if (list.length === 0) { grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><i class="fa-solid fa-handshake-angle"></i><h3>No providers found</h3></div>`; return; }
     grid.innerHTML = '';
     list.forEach(p => {
-      // FIX (XSS): providerName / location were inserted raw into both
-      // innerHTML and a data attribute; both now escaped.
-      const providerName = escapeHTML(p.users?.display_name || 'Provider');
+      // FIX (XSS): providerName / providerType / location / rate were
+      // inserted raw into innerHTML AND into data-* attributes — all
+      // escaped now.
+      const providerNameRaw = p.users?.display_name || 'Provider';
+      const providerName = escapeHTML(providerNameRaw);
       const providerType = escapeHTML((p.provider_type || '').replace('_', ' '));
       const location = escapeHTML(p.location || 'N/A');
-      const rate = escapeHTML(String(p.rate ?? ''));
+      const rate = escapeHTML(String(p.rate ?? 0));
       const card = document.createElement('div');
       card.className = 'glass-card pet-card';
       card.innerHTML = `
@@ -58,7 +60,7 @@ export async function renderServices() {
             <div><i class="fa-solid fa-location-dot"></i> ${location}</div>
             <div><i class="fa-solid fa-indian-rupee-sign"></i> ${rate}/hr</div>
           </div>
-          <button class="btn btn-primary btn-full btn-book-provider" data-id="${escapeHTML(p.user_id)}" data-name="${escapeHTML(p.users?.display_name || 'Provider')}" data-type="${escapeHTML(p.provider_type || '')}" style="font-size:0.8rem;">Book Now</button>
+          <button class="btn btn-primary btn-full btn-book-provider" data-id="${escapeHTML(p.user_id)}" data-name="${escapeHTML(providerNameRaw)}" data-type="${escapeHTML(p.provider_type || '')}" style="font-size:0.8rem;">Book Now</button>
         </div>
       `;
       grid.appendChild(card);

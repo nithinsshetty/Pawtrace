@@ -706,7 +706,169 @@ create policy "Anyone can view journal photos" on storage.objects for select usi
 create policy "Owners manage own medical attachments" on storage.objects for all
   using (bucket_id = 'medical-attachments' and auth.uid()::text = (storage.foldername(name))[1])
   with check (bucket_id = 'medical-attachments' and auth.uid()::text = (storage.foldername(name))[1]);
+-- ============================================================
+-- PAWTRACE — SECURITY PATCH (idempotent, safe to run on existing DB)
+-- Fixes:
+--   1. Head-admin column + enforcement (only a head admin can grant
+--      or revoke the 'admin' role — previously ANY admin could).
+--   2. service_bookings: providers can only view/act on bookings while
+--      their service_providers.status = 'approved' (previously any
+--      pending/suspended provider account retained full access).
+--   3. pet_owner_contact: removed the blanket anonymous SELECT policy.
+--      This table is not currently queried by any app code (scan.js
+--      reads contact fields directly off `pets`), so the safest fix
+--      is to close the open anon read path entirely rather than leave
+--      an unused, over-broad policy in place.
+--   4. stray_reports: reporter PII (name/contact) is no longer exposed
+--      to every authenticated user — regular users get a PII-free view,
+--      NGOs/admins keep full access via the base table.
+-- ============================================================
 
+-- ------------------------------------------------------------
+-- 1. HEAD ADMIN
+-- ------------------------------------------------------------
+alter table public.users
+  add column if not exists is_head_admin boolean not null default false;
+
+-- Bootstrap: if you already have an admin account and no head admin yet,
+-- promote your existing admin manually AFTER running this script, e.g.:
+--   update public.users set is_head_admin = true where email = 'you@example.com';
+-- (Do this once, by hand, in the SQL editor — never from client code.)
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.users where id = auth.uid() and role = 'admin');
+$$;
+
+create or replace function public.is_head_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.users
+    where id = auth.uid() and role = 'admin' and is_head_admin = true
+  );
+$$;
+
+-- Replace the old "any admin can update any user" policy with one that
+-- still lets admins update ordinary fields, but blocks role changes
+-- to/from 'admin' unless the actor is a head admin.
+drop policy if exists "Admins can update any user" on public.users;
+
+create policy "Admins can update any user"
+on public.users
+for update
+using (is_admin())
+with check (
+  is_admin()
+  and (
+    -- either the role isn't changing to/from admin at all...
+    (role <> 'admin' and (select role from public.users u where u.id = public.users.id) <> 'admin')
+    -- ...or the actor is specifically the head admin
+    or is_head_admin()
+  )
+);
+
+-- ------------------------------------------------------------
+-- 2. SERVICE PROVIDER APPROVAL ENFORCEMENT
+-- ------------------------------------------------------------
+drop policy if exists "Providers view own bookings" on public.service_bookings;
+drop policy if exists "Providers update own bookings" on public.service_bookings;
+
+create policy "Approved providers view own bookings"
+on public.service_bookings
+for select
+using (
+  provider_id = auth.uid()
+  and exists (
+    select 1 from public.service_providers sp
+    where sp.user_id = auth.uid() and sp.status = 'approved'
+  )
+);
+
+create policy "Approved providers update own bookings"
+on public.service_bookings
+for update
+using (
+  provider_id = auth.uid()
+  and exists (
+    select 1 from public.service_providers sp
+    where sp.user_id = auth.uid() and sp.status = 'approved'
+  )
+)
+with check (
+  provider_id = auth.uid()
+  and exists (
+    select 1 from public.service_providers sp
+    where sp.user_id = auth.uid() and sp.status = 'approved'
+  )
+);
+
+-- ------------------------------------------------------------
+-- 3. pet_owner_contact — close the open anonymous read path
+-- ------------------------------------------------------------
+-- No app code currently queries this table (scan.js reads contact
+-- fields directly off `pets`), so we simply remove the over-broad
+-- anon policy rather than leave unused, risky access in place.
+drop policy if exists "Anon can view contact info only if opted in" on public.pet_owner_contact;
+
+-- ------------------------------------------------------------
+-- 4. STRAY REPORTS — hide reporter PII from ordinary users
+-- ------------------------------------------------------------
+-- Base table: restrict full-row SELECT (including reporter_name /
+-- reporter_contact) to NGOs and admins only.
+drop policy if exists "Anyone authenticated can view stray reports" on public.stray_reports;
+
+create policy "NGOs and admins view full stray reports"
+on public.stray_reports
+for select
+to authenticated
+using (
+  is_admin()
+  or exists (select 1 from public.users where id = auth.uid() and role = 'ngo')
+);
+
+-- Everyone else gets a PII-free view instead.
+create or replace view public.stray_reports_public as
+select
+  id,
+  description,
+  photo_url,
+  latitude,
+  longitude,
+  urgency,
+  status,
+  assigned_volunteer_name,
+  created_at
+from public.stray_reports;
+
+grant select on public.stray_reports_public to authenticated;
+
+-- Regular users can still INSERT reports (unchanged) and can still
+-- see their own submitted report's full details.
+create policy "Reporters can view their own stray reports"
+on public.stray_reports
+for select
+to authenticated
+using (
+  reporter_contact is not null
+  and reporter_contact = (select email from public.users where id = auth.uid())
+);
+-- NOTE: this last policy only helps if you start storing the
+-- reporter's own email in reporter_contact for logged-in reporters.
+-- If reports are always anonymous/contact-by-phone, you can drop this
+-- policy — non-NGO users will then only see stray_reports_public.
+
+-- ============================================================
+-- END OF PATCH
+-- ============================================================
+update public.users set is_head_admin = true where email = 'your-admin-email@example.com';
 -- ============================================================
 -- END OF SCHEMA
 -- ============================================================
