@@ -3,7 +3,7 @@
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
-import { showToast } from './utils.js';
+import { showToast, escapeHTML } from './utils.js';
 
 /**
  * Mark a single notification as read
@@ -56,6 +56,13 @@ export function renderEmergencyAlertBanner(
 ) {
     if (!containerEl) return;
 
+    // FIX (XSS): petName, lastSeenText, and contactPhone were previously
+    // inserted raw. petName in particular is a user-editable field set at
+    // pet registration time.
+    const safePetName = escapeHTML(petName);
+    const safeLastSeen = escapeHTML(lastSeenText || 'Pending scan');
+    const safeContactPhone = escapeHTML(contactPhone);
+
     const div = document.createElement('div');
     div.className = 'alert-banner';
 
@@ -66,12 +73,12 @@ export function renderEmergencyAlertBanner(
 
             <div>
                 <strong style="color:var(--accent-red); font-size:0.95rem;">
-                    EMERGENCY: ${petName} is MISSING!
+                    EMERGENCY: ${safePetName} is MISSING!
                 </strong>
 
                 <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem;">
-                    Last tracked spottings: ${lastSeenText || 'Pending scan'}.
-                    Contact: ${contactPhone}
+                    Last tracked spottings: ${safeLastSeen}.
+                    Contact: ${safeContactPhone}
                 </p>
             </div>
         </div>

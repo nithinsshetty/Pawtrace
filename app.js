@@ -4,7 +4,7 @@
 
 import { Router } from './router.js';
 import { initAuth, subscribeToAuthChanges, signOut, getRouterAuthState, getCurrentUser } from './auth.js';
-import { showToast, showLoading, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, formatFriendlyDate, escapeHTML } from './utils.js';
 import { supabase } from './supabase-config.js';
 
 // Route Rendering Modules
@@ -246,21 +246,32 @@ async function fetchAndRenderNotifications(uid) {
       icon = "fa-paw";
     }
 
+    // FIX (XSS): data.maps_link validated as a real http(s) URL before use
+    // in href — a stored notification is not guaranteed to be well-formed.
     let mapMarkup = '';
-    if (data.maps_link) {
+    const safeMapsLink = isSafeHttpUrl(data.maps_link) ? data.maps_link : '';
+    if (safeMapsLink) {
       mapMarkup = `
-        <a href="${data.maps_link}" target="_blank" class="notification-map-link">
+        <a href="${escapeHTML(safeMapsLink)}" target="_blank" class="notification-map-link">
           <i class="fa-solid fa-map-location-dot"></i> View on Google Maps
         </a>
       `;
     }
 
+    // FIX (XSS): data.message was previously inserted raw. This field is
+    // built from many different insert call sites across the codebase
+    // (vet-portal.js, ngo.js, adoptions-client.js, orders.js, admin.js
+    // broadcasts, scan.js), several of which include user-controlled
+    // values (pet names, admin broadcast text) without escaping at the
+    // insert site. Escaping here at the render sink closes every one of
+    // those paths at once, rather than requiring every insert call site
+    // to remember to escape individually.
     item.innerHTML = `
       <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
         <i class="fa-solid ${icon}" style="margin-top: 0.2rem; color: var(--terracotta);"></i>
         <div>
           <strong style="display:block; font-size: 0.85rem;">${title}</strong>
-          <p style="margin: 0.2rem 0; font-size: 0.8rem;">${data.message}</p>
+          <p style="margin: 0.2rem 0; font-size: 0.8rem;">${escapeHTML(data.message)}</p>
           ${mapMarkup}
           <div class="notification-time">${formatFriendlyDate(data.created_at)}</div>
         </div>
