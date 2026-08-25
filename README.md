@@ -178,18 +178,16 @@ const supabaseAnonKey = "YOUR_SUPABASE_PUBLISHABLE_KEY";
 ```
 
 ## Step 6 — Configure Backend Environment Variables
-Create `backend/.env`:
+Create a single `backend/.env` file containing all backend secrets together:
 ```env
 SUPABASE_URL=YOUR_SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 PORT=5000
 ```
-The service-role key must remain private and must only be used by the backend — never place it in any frontend file.
-   ### Gemini API Configuration
-   The chatbot requires a Gemini API key.
-   Create a `.env` file inside the `backend` directory:
-   GEMINI\_API\_KEY=your\_gemini\_api\_key\_here
-   PORT=5000
+- The service-role key must remain private and must only be used by the backend — never place it in any frontend file.
+- `GEMINI_API_KEY` is required for the AI chatbot (`backend/chatbot-routes.js`) — without it, `/api/chatbot/chat` will respond with a clear `500` error explaining the key is missing.
+- Get a Gemini API key at https://aistudio.google.com/apikey.
 
 ## Step 7 — Install Backend Dependencies
 ```bash
@@ -275,9 +273,12 @@ Frontend API base URL is set in `api-config.js`. During local development this s
 
 # 🤖 AI Chatbot Backend
 
-Located in `backend/chatbot-routes.js`, registered under `/api/chatbot`, main server in `backend/server.js`. The chatbot route authenticates using Supabase JWTs (not Firebase tokens) — confirm this route verifies the token via `supabaseAdmin.auth.getUser()` before testing; if chat messages don't get replies, this is the first place to check.
+Located in `backend/chatbot-routes.js`, registered under `/api/chatbot`, main server in `backend/server.js`. The route creates its own Supabase client using the service-role key (`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` from `backend/.env`) and authenticates every request by verifying the caller's Supabase JWT via `supabase.auth.getUser(accessToken)` — **not** Firebase tokens. If chat messages don't get replies, check, in order:
+1. `backend/.env` has `GEMINI_API_KEY` set (see Step 6) — the server logs a startup warning if it's missing.
+2. `backend/.env` has valid `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — the server will refuse to start without these.
+3. The frontend is sending a valid `Authorization: Bearer <access_token>` header (see `ai.js`).
 
-Health endpoint: `GET /api/health`
+Health endpoint: `GET /api/health``
 
 ---
 

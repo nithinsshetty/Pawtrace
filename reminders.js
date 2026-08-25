@@ -1,10 +1,12 @@
 // ==========================================================================
 // REMINDERS & TASK MANAGEMENT MODULE (Supabase)
+// SECURITY FIX: escaped pet name/breed/pawtrace_id in the header and
+// reminder title/type/time in the list items.
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 
 /**
@@ -41,15 +43,15 @@ export async function renderReminders(params) {
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight:800; display:flex; align-items:center; gap:0.5rem;">
-            <span>${pet.name}</span>
+            <span>${escapeHTML(pet.name)}</span>
             <span class="pet-status-badge ${pet.is_lost ? 'lost' : 'safe'}">
               ${pet.is_lost ? 'LOST' : 'SAFE'}
             </span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            <i class="fa-solid fa-dna"></i> ${pet.breed} &nbsp;|&nbsp;
-            <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
-            <i class="fa-solid fa-id-card"></i> ${pet.pawtrace_id}
+            <i class="fa-solid fa-dna"></i> ${escapeHTML(pet.breed)} &nbsp;|&nbsp;
+            <i class="fa-solid fa-scale-balanced"></i> ${escapeHTML(pet.weight)} kg &nbsp;|&nbsp;
+            <i class="fa-solid fa-id-card"></i> ${escapeHTML(pet.pawtrace_id)}
           </p>
         </div>
         <div class="detail-actions">
@@ -168,11 +170,11 @@ async function loadRemindersList(petId) {
         <div class="reminder-left">
           <div class="reminder-checkbox ${item.is_completed ? 'checked' : ''}" data-id="${item.id}" data-status="${item.is_completed}"></div>
           <div class="reminder-info">
-            <span class="reminder-title">${item.title}</span>
+            <span class="reminder-title">${escapeHTML(item.title)}</span>
             <span class="reminder-meta">
-              <i class="fa-solid ${icon}" style="color:var(--teal); font-size:0.75rem;"></i> ${item.reminder_type}
+              <i class="fa-solid ${icon}" style="color:var(--teal); font-size:0.75rem;"></i> ${escapeHTML(item.reminder_type)}
               &nbsp;|&nbsp; Due Date: <strong>${formatFriendlyDate(dueDateOnly)}</strong>
-              ${item.due_time ? `&bull; Time: <strong>${item.due_time}</strong>` : ''}
+              ${item.due_time ? `&bull; Time: <strong>${escapeHTML(item.due_time)}</strong>` : ''}
             </span>
           </div>
         </div>

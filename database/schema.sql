@@ -160,7 +160,6 @@ create policy "Users can view own pets" on public.pets for select using (auth.ui
 create policy "Users can insert own pets" on public.pets for insert with check (auth.uid() = owner_id);
 create policy "Users can update own pets" on public.pets for update using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 create policy "Users can delete own pets" on public.pets for delete using (auth.uid() = owner_id);
-create policy "Anyone can view lost pet basic info via QR" on public.pets for select to anon using (true);
 create policy "Anyone can view lost pets" on public.pets for select using (is_lost = true);
 create policy "Admins can view all pets" on public.pets for select to authenticated using (is_admin());
 create policy "Admins can update all pets" on public.pets for update to authenticated using (is_admin()) with check (is_admin());
@@ -352,10 +351,56 @@ alter table public.caregiver_tokens enable row level security;
 
 create policy "Owners manage own caregiver tokens" on public.caregiver_tokens for all
   using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
-create policy "Anyone can view active caregiver tokens" on public.caregiver_tokens for select
-  to anon using (active = true and expires_at > now());
-create policy "Anyone can update active caregiver tokens" on public.caregiver_tokens for update
-  to anon using (active = true and expires_at > now()) with check (active = true and expires_at > now());
+
+-- NOTE: no anon table-level SELECT/UPDATE policy exists on purpose.
+-- The caregiver token id is a bearer secret (random UUID); a blanket
+-- `active = true` RLS policy would let anyone list/enumerate every
+-- active token for every pet, not just the one they hold. Anonymous
+-- access is instead routed through the two security-definer RPCs below,
+-- which take the token id as an explicit parameter and touch exactly
+-- one row.
+
+create or replace function public.get_caregiver_token(p_token_id uuid)
+returns public.caregiver_tokens
+language sql
+security definer
+set search_path = public
+as $$
+  select * from public.caregiver_tokens
+  where id = p_token_id
+    and active = true
+    and expires_at > now();
+$$;
+
+grant execute on function public.get_caregiver_token(uuid) to anon, authenticated;
+
+create or replace function public.update_caregiver_token_data(
+  p_token_id uuid,
+  p_reminders jsonb default null,
+  p_journal_entries jsonb default null
+)
+returns public.caregiver_tokens
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  result public.caregiver_tokens;
+begin
+  update public.caregiver_tokens
+  set
+    reminders = coalesce(p_reminders, reminders),
+    journal_entries = coalesce(p_journal_entries, journal_entries)
+  where id = p_token_id
+    and active = true
+    and expires_at > now()
+  returning * into result;
+
+  return result;
+end;
+$$;
+
+grant execute on function public.update_caregiver_token_data(uuid, jsonb, jsonb) to anon, authenticated;
 
 -- ============================================================
 -- 13. VET ACCESS (owner-authorized vet sharing)

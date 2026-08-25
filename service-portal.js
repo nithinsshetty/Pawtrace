@@ -1,6 +1,11 @@
+// SECURITY FIX: escaped provider profile status/phone/location, and every
+// booking field (pet name, owner display name, status, notes) that comes
+// from another user (the pet owner) before rendering it into a provider's
+// own portal.
+
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, formatFriendlyDate, escapeHTML } from './utils.js';
 
 export async function renderServicePortal() {
   const viewport = document.getElementById('app-viewport');
@@ -21,7 +26,7 @@ export async function renderServicePortal() {
     viewport.innerHTML = `
       <div style="margin-bottom:1.5rem;">
         <h2 style="font-family:'Outfit'; font-weight:700; font-size:1.6rem;">Service Provider Dashboard</h2>
-        <p style="color:var(--text-muted); font-size:0.9rem;">Status: <strong style="color:${provider.status === 'approved' ? 'var(--accent-green)' : 'var(--accent-yellow)'};">${provider.status.toUpperCase()}</strong></p>
+        <p style="color:var(--text-muted); font-size:0.9rem;">Status: <strong style="color:${provider.status === 'approved' ? 'var(--accent-green)' : 'var(--accent-yellow)'};">${escapeHTML((provider.status || '').toUpperCase())}</strong></p>
       </div>
       <div class="dashboard-grid">
         <div>
@@ -39,9 +44,9 @@ export async function renderServicePortal() {
                 <option value="groomer" ${provider.provider_type==='groomer'?'selected':''}>Groomer</option>
                 <option value="boarding" ${provider.provider_type==='boarding'?'selected':''}>Boarding / Kennel</option>
               </select>
-              <input type="text" id="svc-p-phone" class="form-control" placeholder="Phone" value="${provider.phone || ''}" style="font-size:0.8rem;">
-              <input type="text" id="svc-p-location" class="form-control" placeholder="Service Area" value="${provider.location || ''}" style="font-size:0.8rem;">
-              <input type="number" id="svc-p-rate" class="form-control" placeholder="Rate/hr" value="${provider.rate || 0}" style="font-size:0.8rem;">
+              <input type="text" id="svc-p-phone" class="form-control" placeholder="Phone" value="${escapeHTML(provider.phone || '')}" style="font-size:0.8rem;">
+              <input type="text" id="svc-p-location" class="form-control" placeholder="Service Area" value="${escapeHTML(provider.location || '')}" style="font-size:0.8rem;">
+              <input type="number" id="svc-p-rate" class="form-control" placeholder="Rate/hr" value="${escapeHTML(provider.rate || 0)}" style="font-size:0.8rem;">
               <button type="submit" class="btn btn-primary" style="font-size:0.8rem;">Save Profile</button>
             </form>
           </div>
@@ -89,9 +94,9 @@ async function loadBookings(providerId) {
     }
     return `
       <div class="glass-card" style="padding:0.85rem;">
-        <div class="flex-between"><strong>${b.pets?.name || 'Pet'}</strong><span style="text-transform:capitalize; font-size:0.7rem; color:${b.status==='accepted'?'var(--accent-green)':b.status==='rejected'?'var(--accent-red)':'var(--accent-yellow)'};">${b.status}</span></div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Owner: ${b.users?.display_name} &bull; ${formatFriendlyDate(b.booking_date)} at ${b.booking_time}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted);">${b.notes || ''}</div>
+        <div class="flex-between"><strong>${escapeHTML(b.pets?.name || 'Pet')}</strong><span style="text-transform:capitalize; font-size:0.7rem; color:${b.status==='accepted'?'var(--accent-green)':b.status==='rejected'?'var(--accent-red)':'var(--accent-yellow)'};">${escapeHTML(b.status)}</span></div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Owner: ${escapeHTML(b.users?.display_name || '')} &bull; ${formatFriendlyDate(b.booking_date)} at ${escapeHTML(b.booking_time)}</div>
+        <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHTML(b.notes || '')}</div>
         ${actions}
       </div>
     `;

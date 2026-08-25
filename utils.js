@@ -3,13 +3,36 @@
 // ==========================================================================
 import { supabase } from './supabase-config.js';
 
+/**
+ * SECURITY FIX: the previous implementation used the
+ * `div.textContent = str; return div.innerHTML;` trick, which only encodes
+ * `&`, `<`, `>` — it does NOT encode quote characters, because quotes are
+ * only meaningful inside HTML *attribute* contexts, not text-node contexts.
+ * Since escapeHTML() output is used throughout the app inside
+ * value="${escapeHTML(x)}" / data-id="${escapeHTML(x)}" attributes, the old
+ * implementation left every one of those call sites vulnerable to
+ * attribute-breakout XSS via a double-quote character in the field.
+ * This version explicitly encodes quotes too, making it safe for both
+ * text-node and attribute-value contexts.
+ */
 export function escapeHTML(str) {
   if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
-  const div = document.createElement('div');
-  div.textContent = String(str);
-
-  return div.innerHTML;
+export function isSafeHttpUrl(str) {
+  if (!str) return false;
+  try {
+    const url = new URL(str, window.location.origin);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 /**
  * Toast notification controller
@@ -287,10 +310,6 @@ export function calculateAge(dobString) {
 }
 
 /**
- * Helper to display warning check if database cannot connect
- */
-
-/**
  * Upload a file to Supabase Storage. Path must start with the user's own
  * UID as the first folder segment (required by storage RLS policies).
  * Returns a public URL for public buckets, or a long-lived signed URL for private ones.
@@ -373,8 +392,6 @@ export function getPetImageHTML(pet, sizeClass = '') {
  * Handles permission-restricted queries gracefully.
  * @returns {Promise<string>}
  */
-
-
 export async function generatePawTraceId() {
   const { supabase } = await import('./supabase-config.js');
   while (true) {

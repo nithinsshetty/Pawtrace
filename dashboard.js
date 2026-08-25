@@ -1,10 +1,12 @@
 // ==========================================================================
 // PAWTRACE OWNER DASHBOARD MODULE (Supabase)
+// SECURITY FIX: escaped user display name, pet name/breed/gender/pawtrace_id,
+// reminder titles, scan notification messages/links, and AI-insight text.
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, formatFriendlyDate, getPetImageHTML } from './utils.js';
+import { showToast, showLoading, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
 
 let mapInstance = null;
 
@@ -24,7 +26,7 @@ export async function renderDashboard() {
       <div>
         <div class="glass-card mb-2" style="background: linear-gradient(135deg, rgba(31, 122, 140, 0.05) 0%, rgba(219, 93, 57, 0.05) 100%); padding: 2rem;">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 800; margin-bottom: 0.5rem;">
-            Hello, ${user.displayName || user.email.split('@')[0]}!
+            Hello, ${escapeHTML(user.displayName || user.email.split('@')[0])}!
           </h2>
           <p style="color: var(--text-muted); font-size: 0.9rem;">
             All systems online. Your digital identity collars are actively monitored.
@@ -168,13 +170,13 @@ export async function renderDashboard() {
           </div>
           <div class="pet-card-content">
             <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center;">
-              <span>${pet.name}</span>
-              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${pet.pawtrace_id || 'PT-PENDING'}</span>
+              <span>${escapeHTML(pet.name)}</span>
+              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${escapeHTML(pet.pawtrace_id || 'PT-PENDING')}</span>
             </h4>
             <div class="pet-card-meta">
-              <span>${pet.breed || 'Unknown'}</span>
+              <span>${escapeHTML(pet.breed || 'Unknown')}</span>
               <span>•</span>
-              <span>${pet.gender || 'N/A'}</span>
+              <span>${escapeHTML(pet.gender || 'N/A')}</span>
             </div>
             <div class="pet-card-actions">
               <a href="${actionLink}" class="btn btn-secondary btn-full" style="font-size:0.8rem; padding:0.45rem 1rem;">
@@ -253,7 +255,7 @@ async function initDashboardRadarMap(petIds) {
           <div style="font-family:'Outfit',sans-serif; font-size:0.8rem;">
             <strong style="color:var(--terracotta);">Scan Spotting</strong><br>
             Time: ${formatFriendlyDate(scan.created_at)}<br>
-            <a href="${scan.maps_link}" target="_blank" style="color:var(--teal); font-weight:600;">Directions</a>
+            <a href="${escapeHTML(scan.maps_link)}" target="_blank" style="color:var(--teal); font-weight:600;">Directions</a>
           </div>
         `;
         L.marker([scan.latitude, scan.longitude])
@@ -328,8 +330,8 @@ async function loadDashboardReminders(petIds) {
         <div class="reminder-left">
           <i class="fa-solid ${icon}" style="color:var(--teal);"></i>
           <div class="reminder-info">
-            <span class="reminder-title">${item.title}</span>
-            <span class="reminder-meta">${petName} &bull; ${formatFriendlyDate(item.reminder_date)}</span>
+            <span class="reminder-title">${escapeHTML(item.title)}</span>
+            <span class="reminder-meta">${escapeHTML(petName)} &bull; ${formatFriendlyDate(item.reminder_date)}</span>
           </div>
         </div>
       `;
@@ -381,9 +383,9 @@ async function loadRecentScanLogs(uid) {
           <span><i class="fa-solid fa-circle-exclamation"></i> GPS Spotting Logged</span>
           <span style="font-size:0.65rem; color:var(--text-muted);">${formatFriendlyDate(data.created_at)}</span>
         </div>
-        <p style="margin: 0.25rem 0; line-height:1.4;">${data.message}</p>
+        <p style="margin: 0.25rem 0; line-height:1.4;">${escapeHTML(data.message)}</p>
         ${data.maps_link ? `
-          <a href="${data.maps_link}" target="_blank" class="btn btn-outline mt-1" style="font-size: 0.7rem; padding: 0.35rem 0.75rem; width: fit-content;">
+          <a href="${escapeHTML(data.maps_link)}" target="_blank" class="btn btn-outline mt-1" style="font-size: 0.7rem; padding: 0.35rem 0.75rem; width: fit-content;">
             <i class="fa-solid fa-map-location-dot"></i> Maps Directions
           </a>
         ` : ''}
@@ -409,12 +411,13 @@ function generateAIInsights(pets) {
   }
 
   const firstPet = pets[0];
+  const safeName = escapeHTML(firstPet.name);
 
-  let recommText = `Based on weight progression records for <strong>${firstPet.name}</strong>, their weight is stable. We suggest maintaining their current diet schedule.`;
+  let recommText = `Based on weight progression records for <strong>${safeName}</strong>, their weight is stable. We suggest maintaining their current diet schedule.`;
   if (firstPet.vaccination_status === 'Incomplete') {
-    recommText = `Health Alert: <strong>${firstPet.name}</strong> has vaccination logs marked as incomplete. We forecast an elevated risk of infection; please schedule a deworming checkup soon.`;
+    recommText = `Health Alert: <strong>${safeName}</strong> has vaccination logs marked as incomplete. We forecast an elevated risk of infection; please schedule a deworming checkup soon.`;
   } else if (firstPet.weight > 35) {
-    recommText = `Weight Warning: <strong>${firstPet.name}</strong>'s current weight of ${firstPet.weight}kg suggests they are in the upper range for their breed. We suggest a 10% increase in daily activity.`;
+    recommText = `Weight Warning: <strong>${safeName}</strong>'s current weight of ${escapeHTML(firstPet.weight)}kg suggests they are in the upper range for their breed. We suggest a 10% increase in daily activity.`;
   }
 
   insightsBox.innerHTML = `

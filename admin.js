@@ -4,7 +4,13 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, formatFriendlyDate, showModal } from './utils.js';
+import {
+  showToast,
+  showLoading,
+  formatFriendlyDate,
+  showModal,
+  escapeHTML
+} from './utils.js';
 import { Router } from './router.js';
 import { initPasswordToggles } from './pages.js';
 
@@ -86,7 +92,10 @@ export function renderAdminLogin() {
     const email = document.getElementById('admin-email').value.trim();
     const password = document.getElementById('admin-password').value;
 
-    
+    if (!email || !password) {
+      showToast("Please fill in all fields.", "error");
+      return;
+    }
 
     showLoading(true, "Authenticating Admin...");
     try {
@@ -405,9 +414,22 @@ async function renderOrdersTab(container) {
       rowsHtml += `
         <tr>
           <td><strong style="font-family:monospace; font-size:0.75rem;">${order.id.substr(0, 8)}</strong></td>
-          <td><strong>${order.pet_name || ''}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${order.owner_name || ''}</span></td>
-          <td><span style="font-size:0.75rem;">${order.address || ''}</span><br><span style="font-size:0.7rem; color:var(--text-muted);">${order.owner_phone || ''}</span></td>
-          <td><span style="font-size:0.75rem;">${formatFriendlyDate(order.created_at)}</span></td>
+          <td>
+            <strong>${escapeHTML(order.pet_name || '')}</strong><br>
+            <span style="font-size:0.7rem; color:var(--text-muted);">
+              ${escapeHTML(order.owner_name || '')}
+            </span>
+          </td>
+
+          <td>
+            <span style="font-size:0.75rem;">
+              ${escapeHTML(order.address || '')}
+            </span><br>
+
+            <span style="font-size:0.7rem; color:var(--text-muted);">
+              ${escapeHTML(order.owner_phone || '')}
+            </span>
+          </td>
           <td>${statusBadge}</td>
           <td><div style="display:flex; gap:0.25rem;">${actionButtons}</div></td>
         </tr>
@@ -446,59 +468,109 @@ async function renderUsersTab(container) {
   if (error) throw new Error(`Failed to read 'users' table: ${error.message}`);
 
   let rowsHtml = '';
+  const currentAdmin = getCurrentUser();
+  const currentAdminId = currentAdmin ? currentAdmin.uid : null;
+  const isHeadAdmin = currentAdmin?.isHeadAdmin === true;
+
   users.forEach(user => {
-    let role = (user.role || 'unknown').toLowerCase();
+    const role = (user.role || 'unknown').toLowerCase();
+
     let roleBadge = '';
+
     if (role === 'admin') {
-      roleBadge = '<span class="pet-status-badge lost" style="background:#e63946; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Admin</span>';
+      roleBadge =
+        '<span class="pet-status-badge lost" style="background:#e63946; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Admin</span>';
     } else if (role === 'vet' || role === 'veterinarian') {
-      roleBadge = '<span class="pet-status-badge safe" style="background:var(--teal); position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Vet</span>';
+      roleBadge =
+        '<span class="pet-status-badge safe" style="background:var(--teal); position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Vet</span>';
     } else if (role === 'ngo') {
-      roleBadge = '<span class="pet-status-badge safe" style="background:#e09f3e; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">NGO</span>';
+      roleBadge =
+        '<span class="pet-status-badge safe" style="background:#e09f3e; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">NGO</span>';
     } else if (role === 'owner' || role === 'customer') {
-      roleBadge = '<span class="pet-status-badge safe" style="background:#3f8efc; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Customer</span>';
+      roleBadge =
+        '<span class="pet-status-badge safe" style="background:#3f8efc; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Customer</span>';
     } else if (role === 'service_provider') {
-      roleBadge = '<span class="pet-status-badge safe" style="background:#52b788; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Provider</span>';
+      roleBadge =
+        '<span class="pet-status-badge safe" style="background:#52b788; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Provider</span>';
     } else {
-      roleBadge = '<span class="pet-status-badge safe" style="background:#7f8c8d; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Unknown</span>';
+      roleBadge =
+        '<span class="pet-status-badge safe" style="background:#7f8c8d; position:static; display:inline-block; font-size:0.7rem; text-transform:uppercase;">Unknown</span>';
     }
 
-    const joined = user.created_at ? formatFriendlyDate(user.created_at) : 'N/A';
+    const joined = user.created_at
+      ? formatFriendlyDate(user.created_at)
+      : 'N/A';
+
+    const safeUserId = encodeURIComponent(user.id || '');
+    const safeDisplayName = encodeURIComponent(user.display_name || '');
 
     let actionBtn = '';
-    const currentAdmin = getCurrentUser();
-    const currentAdminId = currentAdmin ? currentAdmin.uid : null;
-    const isHeadAdmin = currentAdmin && currentAdmin.isHeadAdmin === true;
 
     if (user.role !== 'admin') {
       if (isHeadAdmin) {
-        actionBtn = `<button class="btn btn-outline btn-sm" onclick="window.Admin.makeUserAdmin('${user.id}', '${(user.display_name || '').replace(/'/g, "\\'")}')" style="font-size:0.7rem; padding:0.35rem 0.5rem;">Make Admin</button>`;
+        actionBtn = `
+          <button
+            class="btn btn-outline btn-sm admin-make-btn"
+            data-user-id="${escapeHTML(user.id || '')}"
+            data-display-name="${escapeHTML(user.display_name || '')}"
+            style="font-size:0.7rem; padding:0.35rem 0.5rem;">
+            Make Admin
+          </button>
+        `;
       } else {
-        actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">-</span>`;
+        actionBtn =
+          '<span style="font-size:0.75rem; color:var(--text-muted);">-</span>';
       }
     } else if (user.id === currentAdminId) {
-      actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Active Session</span>`;
+      actionBtn =
+        '<span style="font-size:0.75rem; color:var(--text-muted);">Active Session</span>';
     } else {
       if (isHeadAdmin) {
-        actionBtn = `<button class="btn btn-danger btn-sm" onclick="window.Admin.demoteAdmin('${user.id}', '${(user.display_name || '').replace(/'/g, "\\'")}')" style="font-size:0.7rem; padding:0.35rem 0.5rem; background:#e63946; border:none; color:white;">Revoke Admin</button>`;
+        actionBtn = `
+          <button
+            class="btn btn-danger btn-sm admin-demote-btn"
+            data-user-id="${escapeHTML(user.id || '')}"
+            data-display-name="${escapeHTML(user.display_name || '')}"
+            style="font-size:0.7rem; padding:0.35rem 0.5rem; background:#e63946; border:none; color:white;">
+            Revoke Admin
+          </button>
+        `;
       } else {
-        actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Admin Account</span>`;
+        actionBtn =
+          '<span style="font-size:0.75rem; color:var(--text-muted);">Admin Account</span>';
       }
     }
+
+    const photoUrl =
+      user.photo_url ||
+      `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.id || '')}`;
 
     rowsHtml += `
       <tr class="user-row-item">
         <td>
           <div style="display:flex; align-items:center; gap:0.5rem;">
-            <img src="${user.photo_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.id}" style="width:30px; height:30px; border-radius:50%; object-fit:cover;">
+            <img
+              src="${escapeHTML(photoUrl)}"
+              alt="User profile"
+              style="width:30px; height:30px; border-radius:50%; object-fit:cover;"
+            >
             <div>
-              <strong>${user.display_name || 'Unnamed'}</strong><br>
-              <span style="font-size:0.7rem; color:var(--text-muted);">${user.email}</span>
+              <strong>${escapeHTML(user.display_name || 'Unnamed')}</strong><br>
+              <span style="font-size:0.7rem; color:var(--text-muted);">
+                ${escapeHTML(user.email || '')}
+              </span>
             </div>
           </div>
         </td>
+
         <td>${roleBadge}</td>
-        <td><span style="font-size:0.75rem;">${joined}</span></td>
+
+        <td>
+          <span style="font-size:0.75rem;">
+            ${escapeHTML(joined)}
+          </span>
+        </td>
+
         <td>${actionBtn}</td>
       </tr>
     `;
@@ -507,11 +579,23 @@ async function renderUsersTab(container) {
   container.innerHTML = `
     <div style="margin-bottom: 2rem; display:flex; justify-content:space-between; align-items:flex-end;">
       <div>
-        <h2 style="font-family:'Outfit'; font-weight:800; font-size:1.6rem;">Registered Users Directory</h2>
-        <p style="color: var(--text-muted); font-size:0.9rem;">Inspect and manage platform users access privileges</p>
+        <h2 style="font-family:'Outfit'; font-weight:800; font-size:1.6rem;">
+          Registered Users Directory
+        </h2>
+
+        <p style="color: var(--text-muted); font-size:0.9rem;">
+          Inspect and manage platform users access privileges
+        </p>
       </div>
+
       <div>
-        <input type="text" id="admin-user-search" class="form-control" placeholder="Search by name or email..." style="width:260px; font-size:0.8rem; padding:0.5rem 1rem;">
+        <input
+          type="text"
+          id="admin-user-search"
+          class="form-control"
+          placeholder="Search by name or email..."
+          style="width:260px; font-size:0.8rem; padding:0.5rem 1rem;"
+        >
       </div>
     </div>
 
@@ -525,6 +609,7 @@ async function renderUsersTab(container) {
             <th>Actions</th>
           </tr>
         </thead>
+
         <tbody id="admin-users-tbody">
           ${rowsHtml}
         </tbody>
@@ -532,21 +617,42 @@ async function renderUsersTab(container) {
     </div>
   `;
 
+  // Secure event handlers — no user-controlled values inside inline JavaScript.
+  container.querySelectorAll('.admin-make-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      makeUserAdmin(
+        button.dataset.userId,
+        button.dataset.displayName
+      );
+    });
+  });
+
+  container.querySelectorAll('.admin-demote-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      demoteAdmin(
+        button.dataset.userId,
+        button.dataset.displayName
+      );
+    });
+  });
+
   const searchInput = document.getElementById('admin-user-search');
   const tbody = document.getElementById('admin-users-tbody');
-  searchInput.oninput = () => {
-    const query = searchInput.value.trim().toLowerCase();
-    const rows = tbody.querySelectorAll('.user-row-item');
 
-    rows.forEach(row => {
-      const text = row.textContent.toLowerCase();
-      if (text.includes(query)) {
-        row.style.display = '';
-      } else {
-        row.style.display = 'none';
-      }
-    });
-  };
+  if (searchInput && tbody) {
+    searchInput.oninput = () => {
+      const query = searchInput.value.trim().toLowerCase();
+      const rows = tbody.querySelectorAll('.user-row-item');
+
+      rows.forEach(row => {
+        row.style.display = row.textContent
+          .toLowerCase()
+          .includes(query)
+          ? ''
+          : 'none';
+      });
+    };
+  }
 }
 
 async function renderDoctorsTab(container) {
@@ -574,9 +680,24 @@ async function renderDoctorsTab(container) {
 
       rowsHtml += `
         <tr>
-          <td><strong>${clinicName}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${vet.email}</span></td>
-          <td><span style="font-family:monospace; font-weight:600; font-size:0.75rem;">${license}</span></td>
-          <td><span style="font-size:0.75rem;">${specs}</span></td>
+          <td>
+            <strong>${escapeHTML(clinicName)}</strong><br>
+            <span style="font-size:0.7rem; color:var(--text-muted);">
+              ${escapeHTML(vet.email || '')}
+            </span>
+          </td>
+
+          <td>
+            <span style="font-family:monospace; font-weight:600; font-size:0.75rem;">
+              ${escapeHTML(license)}
+            </span>
+          </td>
+
+          <td>
+            <span style="font-size:0.75rem;">
+              ${escapeHTML(specs)}
+            </span>
+          </td>
           <td>${statusBadge}</td>
           <td>${actionButton}</td>
         </tr>
@@ -634,9 +755,25 @@ async function renderNgosTab(container) {
 
       rowsHtml += `
         <tr>
-          <td><strong>${orgName}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${ngo.email}</span></td>
-          <td><span style="font-family:monospace; font-weight:600; font-size:0.75rem;">${regId}</span></td>
-          <td><span style="font-size:0.75rem;"><i class="fa-solid fa-location-dot"></i> ${location}</span></td>
+         <td>
+          <strong>${escapeHTML(orgName)}</strong><br>
+          <span style="font-size:0.7rem; color:var(--text-muted);">
+            ${escapeHTML(ngo.email || '')}
+          </span>
+        </td>
+
+        <td>
+          <span style="font-family:monospace; font-weight:600; font-size:0.75rem;">
+            ${escapeHTML(regId)}
+          </span>
+        </td>
+
+        <td>
+          <span style="font-size:0.75rem;">
+            <i class="fa-solid fa-location-dot"></i>
+            ${escapeHTML(location)}
+          </span>
+        </td>
           <td>${statusBadge}</td>
           <td>${actionButton}</td>
         </tr>
@@ -940,12 +1077,50 @@ async function renderProvidersTab(container) {
 
       rowsHtml += `
         <tr>
-          <td><strong>${userInfo.display_name}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">${userInfo.email}</span></td>
-          <td><span style="font-weight:600; font-size:0.75rem; text-transform:uppercase;">${p.provider_type || ''}</span></td>
-          <td><span style="font-size:0.75rem;">$${p.rate}/hr</span></td>
-          <td><span style="font-size:0.75rem;">${p.location || ''}</span></td>
           <td>
-            ${p.id_proof_url ? `<a href="${p.id_proof_url}" target="_blank" class="text-link" style="font-size:0.75rem;"><i class="fa-solid fa-file-contract"></i> View ID</a>` : '<span style="font-size:0.75rem; color:var(--text-muted);">None</span>'}
+            <strong>${escapeHTML(userInfo.display_name || 'Care Sitter')}</strong><br>
+            <span style="font-size:0.7rem; color:var(--text-muted);">
+              ${escapeHTML(userInfo.email || 'N/A')}
+            </span>
+          </td>
+
+          <td>
+            <span style="font-weight:600; font-size:0.75rem; text-transform:uppercase;">
+              ${escapeHTML(p.provider_type || '')}
+            </span>
+          </td>
+
+          <td>
+            <span style="font-size:0.75rem;">
+              $${Number(p.rate || 0).toFixed(2)}/hr
+            </span>
+          </td>
+
+          <td>
+            <span style="font-size:0.75rem;">
+              ${escapeHTML(p.location || '')}
+            </span>
+          </td>
+
+          <td>
+            ${
+              p.id_proof_url
+                ? `
+                  
+                    href="${escapeHTML(p.id_proof_url)}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-link"
+                    style="font-size:0.75rem;">
+                    <i class="fa-solid fa-file-contract"></i> View ID
+                  </a>
+                `
+                : `
+                  <span style="font-size:0.75rem; color:var(--text-muted);">
+                    None
+                  </span>
+                `
+            }
           </td>
           <td>${statusBadge}</td>
           <td>${actionButton}</td>
@@ -1008,11 +1183,37 @@ async function renderReportsTab(container) {
 
       rowsHtml += `
         <tr>
-          <td><span style="font-size:0.75rem; font-family:monospace;">${r.id}</span></td>
-          <td><span style="font-size:0.75rem; font-weight:600; text-transform:uppercase;">${r.target_type}</span><br><span style="font-size:0.65rem; color:var(--text-muted); font-family:monospace;">${r.target_id}</span></td>
-          <td><span style="font-size:0.75rem; font-family:monospace;">${r.reporter_user_id || ''}</span></td>
-          <td><strong>${r.reason}</strong></td>
-          <td><p style="font-size:0.75rem; color:var(--text-muted); max-width:200px; word-wrap:break-word; margin:0;">${r.details || ''}</p></td>
+        <td>
+          <span style="font-size:0.75rem; font-family:monospace;">
+            ${escapeHTML(r.id || '')}
+          </span>
+        </td>
+
+        <td>
+          <span style="font-size:0.75rem; font-weight:600; text-transform:uppercase;">
+            ${escapeHTML(r.target_type || '')}
+          </span>
+          <br>
+          <span style="font-size:0.65rem; color:var(--text-muted); font-family:monospace;">
+            ${escapeHTML(r.target_id || '')}
+          </span>
+        </td>
+
+        <td>
+          <span style="font-size:0.75rem; font-family:monospace;">
+            ${escapeHTML(r.reporter_user_id || '')}
+          </span>
+        </td>
+
+        <td>
+          <strong>${escapeHTML(r.reason || '')}</strong>
+        </td>
+
+        <td>
+          <p style="font-size:0.75rem; color:var(--text-muted); max-width:200px; word-wrap:break-word; margin:0;">
+            ${escapeHTML(r.details || '')}
+          </p>
+        </td>
           <td><span style="font-size:0.75rem;">${dateStr}</span></td>
           <td>${statusBadge}</td>
           <td><div style="display:flex; flex-direction:column; gap:0.25rem;">${actionButtons}</div></td>
@@ -1074,6 +1275,17 @@ export async function toggleProviderStatus(providerId, status) {
   }
 }
 
+/**
+ * FIX (#13): Report moderation now handles 'listing' target_type reports.
+ *
+ * The old comment here claimed the `pet_listings` table "hasn't been
+ * migrated to Supabase yet" — that is stale. `listings.js` already reads
+ * and writes `pet_listings` (createPetListing / updatePetListingStatus /
+ * getActivePetListings), so a report of target_type === 'listing' can
+ * genuinely be actioned: penalizing a listing now marks it 'removed' in
+ * `pet_listings` and notifies the seller, exactly like the existing
+ * 'provider' branch does for service_providers.
+ */
 export async function moderateReport(reportId, action) {
   showLoading(true, "Processing moderation response...");
   try {
@@ -1094,10 +1306,44 @@ export async function moderateReport(reportId, action) {
           message: "Alert: Your service profile has been suspended following community safety reports.",
           is_read: false
         });
+      } else if (r.target_type === 'listing') {
+        const { data: listing, error: listingFetchErr } = await supabase
+          .from('pet_listings')
+          .select('id, seller_user_id')
+          .eq('id', r.target_id)
+          .maybeSingle();
+
+        if (listingFetchErr) {
+          console.error("Failed to fetch listing for moderation:", listingFetchErr);
+          showToast("Could not locate the reported listing. Report left unresolved.", "warning");
+          return;
+        }
+
+        if (!listing) {
+          // Listing no longer exists (already deleted/sold) — safe to
+          // resolve the report since there's nothing left to moderate.
+          showToast("Reported listing no longer exists. Marking report resolved.", "info");
+        } else {
+          const { error: listingUpdateErr } = await supabase
+            .from('pet_listings')
+            .update({ status: 'removed', updated_at: new Date().toISOString() })
+            .eq('id', listing.id);
+          if (listingUpdateErr) throw listingUpdateErr;
+
+          if (listing.seller_user_id) {
+            await supabase.from('notifications').insert({
+              user_id: listing.seller_user_id,
+              type: 'STATUS_CHANGE',
+              message: "Alert: Your marketplace listing has been removed following community safety reports.",
+              is_read: false
+            });
+          }
+        }
       }
-      // NOTE: marketplace 'listing' moderation depends on a petListings table
-      // that hasn't been migrated to Supabase yet — will be wired up when
-      // listings.js is rewritten.
+      // Any other target_type (e.g. community posts) currently has no
+      // dedicated penalty action — the report is still marked resolved
+      // below so it leaves the active queue, but no destructive action
+      // is silently skipped for the two types we do support.
     }
 
     await supabase.from('reports').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', reportId);
@@ -1130,7 +1376,9 @@ export function printPetQR(petId, petName) {
         <div style="background:#1f7a8c; padding:2rem; border-radius: var(--radius-md); display:inline-block; color:white;">
           <h3 style="font-family:'Outfit', sans-serif; font-weight:800; font-size:1.4rem; margin-bottom: 1rem;">🐾 PAWTRACE</h3>
           <div id="admin-qrcode-box" style="background:white; padding:1rem; border-radius:var(--radius-sm); display:inline-block;"></div>
-          <p style="font-size: 0.8rem; margin-top: 0.5rem; font-weight:700;">${petName}</p>
+          <p style="font-size: 0.8rem; margin-top: 0.5rem; font-weight:700;">
+            ${escapeHTML(petName || '')}
+          </p>
           <p style="font-size: 0.75rem; margin-top: 0.5rem; font-weight:600; letter-spacing:1px;">SCAN TO REPORT SCANNER GPS LOCATIONS</p>
         </div>
       </div>

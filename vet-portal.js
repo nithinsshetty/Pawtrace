@@ -1,10 +1,14 @@
 // ==========================================================================
 // VETERINARIAN PORTAL MODULE (Supabase) — corrected channel handling
+// SECURITY FIX: added escapeHTML() around every DB-sourced field rendered
+// via innerHTML (pet names, breeds, owner info, medical record text,
+// appointment reasons, clinic profile fields) to close stored-XSS gaps
+// where a pet owner's data could execute script in a verified vet's session.
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
 
 let patientsChannel = null;
 let appointmentsChannel = null;
@@ -58,7 +62,7 @@ export async function renderVetPortal() {
     viewport.innerHTML = `
       <div style="margin-bottom: 2rem;">
         <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.6rem; font-weight: 700;">Clinical Dashboard</h2>
-        <p style="color: var(--text-muted); font-size: 0.9rem;">Clinic Profile: <strong>${clinicName}</strong> &bull; License: <strong>${license}</strong></p>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">Clinic Profile: <strong>${escapeHTML(clinicName)}</strong> &bull; License: <strong>${escapeHTML(license)}</strong></p>
       </div>
       <div class="dashboard-grid">
         <div>
@@ -73,13 +77,13 @@ export async function renderVetPortal() {
           <div class="glass-card mb-3">
             <h4 style="font-weight:700; color:var(--portal-accent); margin-bottom:0.75rem;"><i class="fa-solid fa-user-doctor"></i> Update Clinic Profile</h4>
             <form id="vet-profile-form" style="display:flex; flex-direction:column; gap:0.55rem;">
-              <div class="form-group" style="margin-bottom:0.4rem;"><label style="font-size:0.7rem;">Clinic / Doctor Name *</label><input type="text" id="vet-profile-clinic" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${clinicName}" required></div>
-              <div class="form-group" style="margin-bottom:0.4rem;"><label style="font-size:0.7rem;">Specializations (comma separated) *</label><input type="text" id="vet-profile-special" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${specializations.join(', ')}" required></div>
+              <div class="form-group" style="margin-bottom:0.4rem;"><label style="font-size:0.7rem;">Clinic / Doctor Name *</label><input type="text" id="vet-profile-clinic" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${escapeHTML(clinicName)}" required></div>
+              <div class="form-group" style="margin-bottom:0.4rem;"><label style="font-size:0.7rem;">Specializations (comma separated) *</label><input type="text" id="vet-profile-special" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${escapeHTML(specializations.join(', '))}" required></div>
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-bottom:0.4rem;">
-                <div class="form-group" style="margin-bottom:0;"><label style="font-size:0.7rem;">Operating City *</label><input type="text" id="vet-profile-city" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${city}" required></div>
-                <div class="form-group" style="margin-bottom:0;"><label style="font-size:0.7rem;">Availability Hours *</label><input type="text" id="vet-profile-hours" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${availability}" required></div>
+                <div class="form-group" style="margin-bottom:0;"><label style="font-size:0.7rem;">Operating City *</label><input type="text" id="vet-profile-city" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${escapeHTML(city)}" required></div>
+                <div class="form-group" style="margin-bottom:0;"><label style="font-size:0.7rem;">Availability Hours *</label><input type="text" id="vet-profile-hours" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${escapeHTML(availability)}" required></div>
               </div>
-              <div class="form-group" style="margin-bottom:0.4rem;"><label style="font-size:0.7rem;">Street Address *</label><input type="text" id="vet-profile-address" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${address}" required></div>
+              <div class="form-group" style="margin-bottom:0.4rem;"><label style="font-size:0.7rem;">Street Address *</label><input type="text" id="vet-profile-address" class="form-control" style="font-size:0.75rem; padding:0.4rem 0.6rem;" value="${escapeHTML(address)}" required></div>
               <button type="submit" class="btn btn-primary" style="font-size:0.75rem; padding:0.45rem 0.75rem; margin-top:0.4rem; width:100%;"><i class="fa-solid fa-save"></i> Save Profile Details</button>
             </form>
           </div>
@@ -152,8 +156,6 @@ async function updateVetProfile(uid, licenseNumber) {
   }
 }
 
-
-
 function subscribeSharedPatients(vetUid) {
   if (patientsChannel) { supabase.removeChannel(patientsChannel); patientsChannel = null; }
   patientsChannel = supabase
@@ -214,13 +216,13 @@ async function loadPatientTimeline(petId) {
     row.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:0.35rem; width:100%;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
-          <strong style="font-size:0.85rem;">${record.title}</strong>
+          <strong style="font-size:0.85rem;">${escapeHTML(record.title)}</strong>
           <span class="pet-status-badge" style="background:${roleBadgeColor}; font-size:0.55rem; padding:0.1rem 0.3rem; border-radius:4px; position:static; text-transform:uppercase; color:white;">${roleLabel}</span>
         </div>
-        <p style="font-size:0.75rem; color:var(--text-muted); margin:0; line-height:1.4;">${record.description || ''}</p>
+        <p style="font-size:0.75rem; color:var(--text-muted); margin:0; line-height:1.4;">${escapeHTML(record.description || '')}</p>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.25rem; font-size:0.65rem; color:var(--text-muted);">
           <span><i class="fa-solid fa-calendar"></i> Date: ${formatFriendlyDate(record.visit_date)}</span>
-          <span><i class="fa-solid fa-user-md"></i> Filed By: ${record.created_by_display_name || 'System'}</span>
+          <span><i class="fa-solid fa-user-md"></i> Filed By: ${escapeHTML(record.created_by_display_name || 'System')}</span>
         </div>
       </div>
     `;
@@ -322,9 +324,9 @@ async function loadSharedPatients(vetUid) {
         <span class="pet-status-badge safe" style="background:var(--portal-accent); border-radius:4px;">SHARED PATIENT</span>
       </div>
       <div class="pet-card-content">
-        <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center; margin:0 0 0.5rem 0;"><span>${pet.name}</span><span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${pet.pawTraceId}</span></h4>
-        <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;"><span>${pet.breed} &bull; ${pet.gender}</span></div>
-        <button class="btn btn-primary btn-full btn-treatment" data-id="${pet.id}" data-name="${pet.name}" style="font-size:0.75rem; padding:0.4rem 0.8rem;"><i class="fa-solid fa-stethoscope"></i> Manage Health Log</button>
+        <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center; margin:0 0 0.5rem 0;"><span>${escapeHTML(pet.name)}</span><span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${escapeHTML(pet.pawTraceId)}</span></h4>
+        <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;"><span>${escapeHTML(pet.breed)} &bull; ${escapeHTML(pet.gender)}</span></div>
+        <button class="btn btn-primary btn-full btn-treatment" data-id="${pet.id}" data-name="${escapeHTML(pet.name)}" style="font-size:0.75rem; padding:0.4rem 0.8rem;"><i class="fa-solid fa-stethoscope"></i> Manage Health Log</button>
       </div>
     `;
     container.appendChild(card);
@@ -385,7 +387,7 @@ async function loadVetAppointments(vetUid) {
     if (app.status === 'pending') {
       actionsHtml = `<div class="appointment-actions-group"><button class="btn btn-outline btn-accept-app" data-id="${app.id}" data-pet="${app.pet_id}" style="font-size:0.7rem; padding:0.35rem 0.75rem; border-color:var(--portal-accent); color:var(--portal-accent);"><i class="fa-solid fa-circle-check"></i> Accept Request</button><button class="btn btn-outline btn-reject-app" data-id="${app.id}" data-pet="${app.pet_id}" style="font-size:0.7rem; padding:0.35rem 0.75rem; border-color:var(--accent-red); color:var(--accent-red);"><i class="fa-solid fa-circle-xmark"></i> Reject</button></div>`;
     } else if (app.status === 'accepted') {
-      actionsHtml = `<div class="appointment-actions-group"><button class="btn btn-primary btn-complete-app" data-id="${app.id}" data-pet="${app.pet_id}" data-petname="${petName}" style="font-size:0.7rem; padding:0.35rem 0.75rem;"><i class="fa-solid fa-stethoscope"></i> Complete Consultation</button></div>`;
+      actionsHtml = `<div class="appointment-actions-group"><button class="btn btn-primary btn-complete-app" data-id="${app.id}" data-pet="${app.pet_id}" data-petname="${escapeHTML(petName)}" style="font-size:0.7rem; padding:0.35rem 0.75rem;"><i class="fa-solid fa-stethoscope"></i> Complete Consultation</button></div>`;
     }
 
     row.innerHTML = `
@@ -393,15 +395,15 @@ async function loadVetAppointments(vetUid) {
         <div style="display:flex; gap:0.75rem; align-items:center;">
           <i class="fa-solid fa-calendar-check" style="font-size:1.4rem; color:var(--portal-accent);"></i>
           <div style="display:flex; flex-direction:column; gap:0.15rem;">
-            <strong style="font-size:0.9rem;">${petName}</strong>
-            <span style="font-size:0.75rem; color:var(--text-muted);"><i class="fa-solid fa-clock"></i> ${formatFriendlyDate(app.appointment_date)} at ${app.appointment_time}</span>
+            <strong style="font-size:0.9rem;">${escapeHTML(petName)}</strong>
+            <span style="font-size:0.75rem; color:var(--text-muted);"><i class="fa-solid fa-clock"></i> ${formatFriendlyDate(app.appointment_date)} at ${escapeHTML(app.appointment_time)}</span>
           </div>
         </div>
-        <span class="status-badge ${badgeClass}">${app.status || 'pending'}</span>
+        <span class="status-badge ${badgeClass}">${escapeHTML(app.status || 'pending')}</span>
       </div>
       <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.4; border-top:1px dashed var(--border-glass); padding-top:0.5rem; width:100%;">
-        <div style="margin-bottom:0.25rem;"><strong>Reason:</strong> ${app.reason || 'General Checkup'}</div>
-        <div><strong>Owner:</strong> ${ownerName}</div>
+        <div style="margin-bottom:0.25rem;"><strong>Reason:</strong> ${escapeHTML(app.reason || 'General Checkup')}</div>
+        <div><strong>Owner:</strong> ${escapeHTML(ownerName)}</div>
       </div>
       ${actionsHtml}
     `;
@@ -506,8 +508,8 @@ export async function renderVetPatients() {
             <span class="pet-status-badge safe" style="background:var(--portal-accent); border-radius:4px; position: absolute; top: 10px; left: 10px; font-size: 0.6rem; font-weight: 700; color: white;">SHARED PATIENT</span>
           </div>
           <div class="pet-card-content">
-            <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center; margin:0 0 0.5rem 0;"><span>${pet.name}</span><span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${pet.pawTraceId}</span></h4>
-            <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem; line-height: 1.4;"><span>${pet.breed} &bull; ${pet.gender}</span><br><span>Owner: <strong>${pet.ownerName || 'Pet Owner'}</strong></span></div>
+            <h4 class="pet-card-name" style="display:flex; justify-content:space-between; align-items:center; margin:0 0 0.5rem 0;"><span>${escapeHTML(pet.name)}</span><span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">${escapeHTML(pet.pawTraceId)}</span></h4>
+            <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem; line-height: 1.4;"><span>${escapeHTML(pet.breed)} &bull; ${escapeHTML(pet.gender)}</span><br><span>Owner: <strong>${escapeHTML(pet.ownerName || 'Pet Owner')}</strong></span></div>
             <button class="btn btn-primary btn-full btn-open-chart" data-id="${pet.id}" style="font-size:0.8rem; padding:0.5rem; width: 100%;"><i class="fa-solid fa-folder-medical"></i> Open Patient Chart</button>
           </div>
         `;
@@ -559,34 +561,34 @@ async function renderPatientChart(petId) {
     viewport.innerHTML = `
       <div style="margin-bottom: 1.5rem;">
         <button id="btn-back-to-patients" class="btn btn-outline" style="font-size:0.8rem; padding:0.4rem 0.8rem; margin-bottom: 0.75rem;"><i class="fa-solid fa-chevron-left"></i> Back to Patient Directory</button>
-        <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 800; margin: 0;">Clinical Chart: ${pet.name}</h2>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.15rem;">PawTrace ID: <strong>${pet.pawTraceId}</strong> &bull; Species: <strong>${pet.petType || 'Companion'}</strong></p>
+        <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 800; margin: 0;">Clinical Chart: ${escapeHTML(pet.name)}</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.15rem;">PawTrace ID: <strong>${escapeHTML(pet.pawTraceId)}</strong> &bull; Species: <strong>${escapeHTML(pet.petType || 'Companion')}</strong></p>
       </div>
       <div class="grid-cols-3" style="gap: 1.5rem; align-items: start;">
         <div style="display: flex; flex-direction: column; gap: 1.25rem;">
           <div class="glass-card" style="padding: 1.25rem;">
             <div style="text-align: center; margin-bottom: 1.25rem;">
               <div style="display: inline-block; width: 100px; height: 100px; border-radius: 50%; overflow: hidden; border: 3px solid var(--portal-accent); position: relative;">${getPetImageHTML(pet, 'small')}</div>
-              <h3 style="font-family:'Outfit'; font-weight:700; margin: 0.5rem 0 0 0;">${pet.name}</h3>
-              <span class="pet-status-badge safe" style="background:var(--portal-accent); font-size:0.65rem; border-radius:4px; position:static; display:inline-block; margin-top:0.25rem; color: white;">${pet.lostStatus}</span>
+              <h3 style="font-family:'Outfit'; font-weight:700; margin: 0.5rem 0 0 0;">${escapeHTML(pet.name)}</h3>
+              <span class="pet-status-badge safe" style="background:var(--portal-accent); font-size:0.65rem; border-radius:4px; position:static; display:inline-block; margin-top:0.25rem; color: white;">${escapeHTML(pet.lostStatus)}</span>
             </div>
             <div style="font-size:0.8rem; display:flex; flex-direction:column; gap:0.5rem; line-height:1.4;">
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Breed:</span><strong>${pet.breed}</strong></div>
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Gender:</span><strong>${pet.gender}</strong></div>
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">DOB:</span><strong>${pet.dob || 'N/A'}</strong></div>
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Weight:</span><strong>${pet.weight || 'N/A'} kg</strong></div>
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Microchip ID:</span><strong>${pet.microchipId || 'None'}</strong></div>
-              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Blood Type:</span><strong>${pet.bloodType || 'Unknown'}</strong></div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Breed:</span><strong>${escapeHTML(pet.breed)}</strong></div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Gender:</span><strong>${escapeHTML(pet.gender)}</strong></div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">DOB:</span><strong>${escapeHTML(pet.dob || 'N/A')}</strong></div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Weight:</span><strong>${escapeHTML(pet.weight || 'N/A')} kg</strong></div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Microchip ID:</span><strong>${escapeHTML(pet.microchipId || 'None')}</strong></div>
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border-glass); padding-bottom:0.25rem;"><span style="color:var(--text-muted);">Blood Type:</span><strong>${escapeHTML(pet.bloodType || 'Unknown')}</strong></div>
               <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Neutered:</span><strong>${pet.neutered ? 'Yes' : 'No'}</strong></div>
             </div>
           </div>
           <div class="glass-card" style="padding: 1.25rem;">
             <h4 style="font-weight:700; color:var(--portal-accent); margin-bottom:0.75rem;"><i class="fa-solid fa-id-card"></i> Owner Details</h4>
             <div style="font-size:0.8rem; display:flex; flex-direction:column; gap:0.5rem; line-height:1.4;">
-              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Owner Name</span><strong>${pet.ownerName || 'Pet Owner'}</strong></div>
-              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Primary Phone</span><strong>${pet.ownerPhone ? `<a href="tel:${pet.ownerPhone}" style="color:var(--text-main); text-decoration:none;"><i class="fa-solid fa-phone" style="font-size:0.7rem; color:var(--portal-accent); margin-right: 0.25rem;"></i> ${pet.ownerPhone}</a>` : 'Not provided'}</strong></div>
-              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Emergency Contact</span><strong>${pet.emergencyContactName || 'None'} ${pet.emergencyContact ? `(${pet.emergencyContact})` : ''}</strong></div>
-              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Home Address</span><strong style="font-size:0.75rem; font-weight:500; display: block; margin-top: 0.15rem; line-height: 1.35;">${pet.address || ''}<br>${pet.city || ''} ${pet.state || ''} ${pet.postalCode || ''}</strong></div>
+              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Owner Name</span><strong>${escapeHTML(pet.ownerName || 'Pet Owner')}</strong></div>
+              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Primary Phone</span><strong>${pet.ownerPhone ? `<a href="tel:${escapeHTML(pet.ownerPhone)}" style="color:var(--text-main); text-decoration:none;"><i class="fa-solid fa-phone" style="font-size:0.7rem; color:var(--portal-accent); margin-right: 0.25rem;"></i> ${escapeHTML(pet.ownerPhone)}</a>` : 'Not provided'}</strong></div>
+              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Emergency Contact</span><strong>${escapeHTML(pet.emergencyContactName || 'None')} ${pet.emergencyContact ? `(${escapeHTML(pet.emergencyContact)})` : ''}</strong></div>
+              <div><span style="color:var(--text-muted); display:block; font-size:0.7rem;">Home Address</span><strong style="font-size:0.75rem; font-weight:500; display: block; margin-top: 0.15rem; line-height: 1.35;">${escapeHTML(pet.address || '')}<br>${escapeHTML(pet.city || '')} ${escapeHTML(pet.state || '')} ${escapeHTML(pet.postalCode || '')}</strong></div>
             </div>
           </div>
         </div>
@@ -595,7 +597,7 @@ async function renderPatientChart(petId) {
             <h4 style="font-weight:700; color:var(--portal-accent); margin-bottom:0.75rem;"><i class="fa-solid fa-syringe"></i> Vaccination Status</h4>
             <div style="display:flex; align-items:center; gap:0.75rem; background:rgba(31,122,140,0.06); padding:0.75rem; border-radius:var(--radius-sm);">
               <i class="fa-solid fa-shield-cat" style="font-size:1.5rem; color:var(--portal-accent);"></i>
-              <div><span style="font-size:0.7rem; color:var(--text-muted); display:block;">Overall Compliance</span><strong style="font-size:0.95rem; text-transform:uppercase;">${pet.vaccinationStatus || 'Unknown'}</strong></div>
+              <div><span style="font-size:0.7rem; color:var(--text-muted); display:block;">Overall Compliance</span><strong style="font-size:0.95rem; text-transform:uppercase;">${escapeHTML(pet.vaccinationStatus || 'Unknown')}</strong></div>
             </div>
           </div>
           <div class="glass-card" style="padding: 1.25rem;">
@@ -603,8 +605,8 @@ async function renderPatientChart(petId) {
             <div style="max-height: 250px; overflow-y: auto; display:flex; flex-direction:column; gap:0.5rem;">
               ${(!appointments || appointments.length === 0) ? `<div class="empty-state-mini" style="padding:1.5rem 0; text-align: center;"><p>No past consultations logged.</p></div>` : appointments.map(app => `
                 <div style="font-size:0.75rem; padding:0.5rem; border-radius:4px; background:rgba(255,255,255,0.02); border:1px solid var(--border-glass);">
-                  <div style="display:flex; justify-content:space-between; font-weight:600;"><span>${formatFriendlyDate(app.appointment_date)} @ ${app.appointment_time}</span><span style="text-transform:capitalize;">${app.status}</span></div>
-                  <span style="color:var(--text-muted); font-size:0.7rem;">Reason: ${app.reason}</span>
+                  <div style="display:flex; justify-content:space-between; font-weight:600;"><span>${formatFriendlyDate(app.appointment_date)} @ ${escapeHTML(app.appointment_time)}</span><span style="text-transform:capitalize;">${escapeHTML(app.status)}</span></div>
+                  <span style="color:var(--text-muted); font-size:0.7rem;">Reason: ${escapeHTML(app.reason)}</span>
                 </div>
               `).join('')}
             </div>
@@ -662,13 +664,13 @@ async function loadChartTimeline(petId) {
     row.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:0.25rem; width:100%;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
-          <strong style="font-size:0.8rem;">${record.title}</strong>
+          <strong style="font-size:0.8rem;">${escapeHTML(record.title)}</strong>
           <span class="pet-status-badge" style="background:${roleBadgeColor}; font-size:0.55rem; padding:0.1rem 0.3rem; border-radius:4px; position:static; text-transform:uppercase; color: white;">${roleLabel}</span>
         </div>
-        <p style="font-size:0.75rem; color:var(--text-muted); margin:0; line-height:1.35;">${record.description || ''}</p>
+        <p style="font-size:0.75rem; color:var(--text-muted); margin:0; line-height:1.35;">${escapeHTML(record.description || '')}</p>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.2rem; font-size:0.65rem; color:var(--text-muted);">
           <span><i class="fa-solid fa-calendar"></i> ${formatFriendlyDate(record.visit_date)}</span>
-          <span><i class="fa-solid fa-user-md"></i> ${record.created_by_display_name || 'System'}</span>
+          <span><i class="fa-solid fa-user-md"></i> ${escapeHTML(record.created_by_display_name || 'System')}</span>
         </div>
       </div>
     `;

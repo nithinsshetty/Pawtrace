@@ -1,10 +1,12 @@
 // ==========================================================================
 // SETTINGS & PROFILE MANAGEMENT MODULE (Supabase)
+// SECURITY FIX: escaped user.photoURL (attribute), user.displayName, and
+// user.email before rendering them via innerHTML / value attributes.
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser, updateUserProfile, signOut } from './auth.js';
-import { showToast, showLoading, showModal, closeModal } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 import { initPasswordToggles } from './pages.js';
 
@@ -16,26 +18,28 @@ export function renderProfile() {
   const user = getCurrentUser();
   if (!user) return;
 
+  const avatarUrl = user.photoURL || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.uid;
+
   viewport.innerHTML = `
     <div style="max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem;">
       <div class="glass-card magnetic-card" style="padding: 2.5rem;">
         <div style="text-align: center; margin-bottom: 2rem;">
           <div style="width: 100px; height: 100px; border-radius: var(--radius-full); overflow: hidden; margin: 0 auto 1rem; border: 3px solid var(--teal); box-shadow:var(--shadow-md);">
-            <img src="${user.photoURL || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + user.uid}" style="width:100%; height:100%; object-fit: cover;" alt="Avatar">
+            <img src="${escapeHTML(avatarUrl)}" style="width:100%; height:100%; object-fit: cover;" alt="Avatar">
           </div>
-          <h2 style="font-weight: 800; font-family:'Outfit';">${user.displayName || 'PawTrace User'}</h2>
-          <p style="font-size: 0.85rem; color: var(--text-muted);">${user.email}</p>
+          <h2 style="font-weight: 800; font-family:'Outfit';">${escapeHTML(user.displayName || 'PawTrace User')}</h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted);">${escapeHTML(user.email)}</p>
         </div>
 
         <form id="profile-edit-form" style="display:flex; flex-direction:column; gap:1.25rem;">
           <div class="form-group">
             <label for="profile-name">Display Name</label>
-            <input type="text" id="profile-name" class="form-control" value="${user.displayName || ''}" placeholder="Full Name" required autocomplete="name">
+            <input type="text" id="profile-name" class="form-control" value="${escapeHTML(user.displayName || '')}" placeholder="Full Name" required autocomplete="name">
           </div>
 
           <div class="form-group">
             <label for="profile-email">Email Address (Read-only)</label>
-            <input type="email" id="profile-email" class="form-control" value="${user.email}" readonly disabled autocomplete="username">
+            <input type="email" id="profile-email" class="form-control" value="${escapeHTML(user.email)}" readonly disabled autocomplete="username">
           </div>
 
           <button type="submit" class="btn btn-primary btn-full mt-1">

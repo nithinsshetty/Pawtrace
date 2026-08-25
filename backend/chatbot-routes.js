@@ -9,6 +9,13 @@ const supabase = createClient(
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
 
+// FIX (#12): explicit cap on the chatbot message itself. The 100kb
+// express.json() body limit in server.js is a blunt, whole-request
+// backstop — it still allows a ~99KB single `message` string through,
+// which triggers a full (paid) Gemini call every time within the rate
+// limit window. This gives a much tighter, cheap, pre-network-call check.
+const MAX_MESSAGE_LENGTH = 2000;
+
 const tools = [
   {
     functionDeclarations: [
@@ -95,7 +102,7 @@ async function getPetReminder(petName, ownerUid) {
     .maybeSingle();
 
   if (petError) {
-    console.error('Error finding pet:', petError);
+    console.error('Error finding pet:', petError.message || petError.code || 'unknown error');
     return { error: 'Failed to find the pet.' };
   }
 
@@ -115,7 +122,7 @@ async function getPetReminder(petName, ownerUid) {
     .maybeSingle();
 
   if (reminderError) {
-    console.error('Error finding reminder:', reminderError);
+    console.error('Error finding reminder:', reminderError.message || reminderError.code || 'unknown error');
     return { error: 'Failed to retrieve reminders.' };
   }
 
@@ -143,7 +150,7 @@ async function getMedicalRecords(petName, ownerUid) {
     .maybeSingle();
 
   if (petError) {
-    console.error('Error finding pet:', petError);
+    console.error('Error finding pet:', petError.message || petError.code || 'unknown error');
     return { error: 'Failed to find the pet.' };
   }
 
@@ -161,7 +168,7 @@ async function getMedicalRecords(petName, ownerUid) {
     .limit(5);
 
   if (recordsError) {
-    console.error('Error retrieving medical records:', recordsError);
+    console.error('Error retrieving medical records:', recordsError.message || recordsError.code || 'unknown error');
     return { error: 'Failed to retrieve medical records.' };
   }
 
@@ -195,7 +202,7 @@ async function createReminder(
     .maybeSingle();
 
   if (petError) {
-    console.error('Error finding pet:', petError);
+    console.error('Error finding pet:', petError.message || petError.code || 'unknown error');
     return {
       error: 'Failed to find the pet.'
     };
@@ -220,7 +227,7 @@ async function createReminder(
     });
 
   if (reminderError) {
-    console.error('Error creating reminder:', reminderError);
+    console.error('Error creating reminder:', reminderError.message || reminderError.code || 'unknown error');
     return {
       error: 'Failed to create the reminder.'
     };
@@ -302,13 +309,23 @@ router.post('/chat', async (req, res) => {
     }
     uid = user.id;
   } catch (err) {
-    console.error('Supabase authentication error:', err);
+    // FIX (#11): log only a generic marker, never the raw error object,
+    // which can include request/token fragments.
+    console.error('Supabase authentication error while verifying chatbot request.');
     return res.status(401).json({ error: 'Invalid or expired token.' });
   }
 
   const { message } = req.body;
   if (!message || typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'Message is required.' });
+  }
+
+  // FIX (#12): explicit message length cap, checked before any Gemini call
+  // is made (cheap rejection vs. paying for a large-prompt API call).
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({
+      error: `Message is too long. Please keep it under ${MAX_MESSAGE_LENGTH} characters.`
+    });
   }
 
   if (!process.env.GEMINI_API_KEY) {
@@ -331,7 +348,10 @@ router.post('/chat', async (req, res) => {
     const firstData = await firstResponse.json();
 
     if (!firstResponse.ok || firstData.error) {
-      console.error('Gemini API error:', firstResponse.status, firstData.error?.message || firstData);
+      // FIX (#11): log only status code + Gemini's own short error message/
+      // code, never the full response body (which can echo back prompt
+      // content) and never JSON.stringify the whole payload.
+      console.error('Gemini API error:', firstResponse.status, firstData.error?.code || firstData.error?.status || 'unknown');
       return res.status(502).json({ error: 'The AI assistant is temporarily unavailable. Please try again.' });
     }
 
@@ -378,13 +398,17 @@ router.post('/chat', async (req, res) => {
       const secondData = await secondResponse.json();
 
       if (!secondResponse.ok || secondData.error) {
-        console.error('Gemini API error (second call):', secondResponse.status, secondData.error?.message || secondData);
+        // FIX (#11): same — status/code only, no full payload dump. This
+        // path previously could log medical record content that had been
+        // round-tripped through functionResponse.
+        console.error('Gemini API error (second call):', secondResponse.status, secondData.error?.code || secondData.error?.status || 'unknown');
         return res.status(502).json({ error: 'The AI assistant had trouble finishing that response. Please try again.' });
       }
 
       const finalText = secondData.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!finalText) {
-        console.error('Gemini returned no text in second response:', JSON.stringify(secondData));
+        // FIX (#11): log the shape/reason, not the full response body.
+        console.error('Gemini returned no text in second response. finishReason:', secondData.candidates?.[0]?.finishReason || 'unknown');
         return res.status(502).json({ error: 'The AI assistant could not generate a response. Please try again.' });
       }
       return res.json({ reply: finalText });
@@ -392,13 +416,16 @@ router.post('/chat', async (req, res) => {
 
     const reply = parts[0]?.text;
     if (!reply) {
-      console.error('Gemini returned no text and no function call:', JSON.stringify(firstData));
+      // FIX (#11): log the shape/reason, not the full response body.
+      console.error('Gemini returned no text and no function call. finishReason:', firstData.candidates?.[0]?.finishReason || 'unknown');
       return res.status(502).json({ error: 'The AI assistant could not generate a response. Please try again.' });
     }
     res.json({ reply });
 
   } catch (err) {
-    console.error('Chatbot error:', err);
+    // FIX (#11): log only the error message, not the full error object
+    // (which can include stack traces referencing request internals).
+    console.error('Chatbot error:', err.message || 'unknown error');
     res.status(500).json({ error: 'Chatbot failed. Please try again.' });
   }
 });

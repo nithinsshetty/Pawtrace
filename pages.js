@@ -6,7 +6,6 @@
 // settings.js, and pets.js respectively (see app.js imports).
 
 import { signIn, signUp, getCurrentUser } from './auth.js';
-import { supabase } from './supabase-config.js';
 import { showToast, showLoading } from './utils.js';
 import { Router } from './router.js';
 
@@ -308,49 +307,33 @@ export function renderSignup() {
       return;
     }
 
-    // Collect role-specific extra fields BEFORE calling signUp, since
-    // these get written in a follow-up step once the user row exists.
-    let licenseNumber = '';
-    let regId = '';
-    let providerType = '', providerPhone = '', providerLocation = '', providerIdProof = '';
-
+    // FIX (#1 / #4): role-specific details are now passed into signUp()
+    // itself as `roleDetails`, instead of being written via a separate,
+    // racy follow-up call after signUp() has already resolved. signUp()
+    // (auth.js) is the single place that both sanitizes the requested role
+    // and safely persists these details before running its own
+    // verification check.
+    let roleDetails = null;
     if (selectedRole === 'vet') {
-      licenseNumber = document.getElementById('signup-license')?.value.trim() || '';
+      roleDetails = { licenseNumber: document.getElementById('signup-license')?.value.trim() || '' };
     } else if (selectedRole === 'ngo') {
-      regId = document.getElementById('signup-reg')?.value.trim() || '';
+      roleDetails = { registrationId: document.getElementById('signup-reg')?.value.trim() || '' };
     } else if (selectedRole === 'service_provider') {
-      providerType = document.getElementById('signup-prov-type')?.value || '';
-      providerPhone = document.getElementById('signup-prov-phone')?.value.trim() || '';
-      providerLocation = document.getElementById('signup-prov-location')?.value.trim() || '';
-      providerIdProof = document.getElementById('signup-prov-id')?.value.trim() || '';
+      roleDetails = {
+        providerType: document.getElementById('signup-prov-type')?.value || '',
+        phone: document.getElementById('signup-prov-phone')?.value.trim() || '',
+        location: document.getElementById('signup-prov-location')?.value.trim() || '',
+        idProofUrl: document.getElementById('signup-prov-id')?.value.trim() || ''
+      };
     }
 
     try {
-      const newUser = await signUp(email, password, name, { role: selectedRole });
+      await signUp(email, password, name, { role: selectedRole }, roleDetails);
 
-      // Write role-specific details now that the user row exists
-      // (handle_new_user trigger creates it during signUp above).
-      if (selectedRole === 'vet' && licenseNumber) {
-        await supabase
-          .from('users')
-          .update({ vet_details: { licenseNumber, verified: false } })
-          .eq('id', newUser.uid);
-      } else if (selectedRole === 'ngo' && regId) {
-        await supabase
-          .from('users')
-          .update({ ngo_details: { registrationId: regId, approved: false } })
-          .eq('id', newUser.uid);
-      } else if (selectedRole === 'service_provider') {
-        await supabase.from('service_providers').insert({
-          user_id: newUser.uid,
-          provider_type: providerType,
-          phone: providerPhone,
-          location: providerLocation,
-          id_proof_url: providerIdProof,
-          status: 'pending'
-        });
-      }
-
+      // signUp() already blocks + signs out any role that needs admin
+      // approval (vet / ngo / service_provider) with a clear "pending"
+      // message, so reaching this line means the account is fully active
+      // — it's safe to route straight into its portal.
       let targetRoute = '/dashboard';
       if (selectedRole === 'vet') {
         targetRoute = '/vet-portal';
@@ -361,7 +344,14 @@ export function renderSignup() {
       }
       Router.navigate(targetRoute);
     } catch (err) {
-      // Handled in auth.js
+      if (err.pendingApproval) {
+        // Toast already shown inside signUp(); the session was
+        // intentionally ended, so send them back to the login screen
+        // instead of leaving them on a dead signup form.
+        Router.navigate('/login');
+        return;
+      }
+      // Any other failure is already toasted inside signUp().
       console.error(err);
     }
   };

@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, validateFile, FILE_LIMITS, readFileAsDataURL, getPetImageHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, validateFile, FILE_LIMITS, readFileAsDataURL, getPetImageHTML, escapeHTML, isSafeHttpUrl } from './utils.js';
 import { Router } from './router.js';
 
 /**
@@ -19,12 +19,10 @@ export async function renderCaregiver(params) {
   showLoading(true, "Authenticating caregiver token...");
   try {
     const { data: tokenRow, error } = await supabase
-      .from('caregiver_tokens')
-      .select('*')
-      .eq('id', token)
+      .rpc('get_caregiver_token', { p_token_id: token })
       .single();
 
-    // RLS already filters out inactive/expired rows for anonymous visitors,
+    // The RPC only returns a row when it's active and not expired,
     // so any failure here means invalid, expired, or revoked — indistinguishable by design.
     if (error || !tokenRow) {
       renderInvalidTokenState(viewport);
@@ -52,7 +50,7 @@ export async function renderCaregiver(params) {
       <div class="glass-card" style="background: rgba(var(--portal-accent-rgb), 0.08); border-color: var(--portal-accent); padding:1rem; margin-bottom:1.5rem; text-align:center;">
         <h4 style="color:var(--portal-accent); font-weight:700;"><i class="fa-solid fa-user-shield"></i> Caregiver Authorization Active</h4>
         <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">
-          You have temporary authorization to access ${pet.name}'s records. Expires on: <strong>${expiresAt.toLocaleString()}</strong>
+          You have temporary authorization to access ${escapeHTML(pet.name)}'s records. Expires on: <strong>${expiresAt.toLocaleString()}</strong>
         </p>
       </div>
 
@@ -62,12 +60,12 @@ export async function renderCaregiver(params) {
         </div>
         <div class="detail-info">
           <h2 style="font-family: 'Outfit', sans-serif; font-size: 2rem; font-weight:800;">
-            <span>${pet.name}</span>
+            <span>${escapeHTML(pet.name)}</span>
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
-            Breed: <strong>${pet.breed}</strong> &nbsp;|&nbsp;
-            Gender: <strong>${pet.gender}</strong> &nbsp;|&nbsp;
-            Weight: <strong>${pet.weight} kg</strong>
+            Breed: <strong>${escapeHTML(pet.breed)}</strong> &nbsp;|&nbsp;
+            Gender: <strong>${escapeHTML(pet.gender)}</strong> &nbsp;|&nbsp;
+            Weight: <strong>${escapeHTML(pet.weight)} kg</strong>
           </p>
         </div>
       </div>
@@ -136,9 +134,9 @@ async function loadCaregiverMedical(petId, tokenData, container) {
 
   records.forEach(record => {
     let attachmentMarkup = '';
-    if (record.attachment_url) {
+    if (record.attachment_url && isSafeHttpUrl(record.attachment_url)) {
       attachmentMarkup = `
-        <a href="${record.attachment_url}" target="_blank" class="timeline-attachment">
+        <a href="${escapeHTML(record.attachment_url)}" target="_blank" rel="noopener noreferrer" class="timeline-attachment">
           <i class="fa-solid fa-file"></i> View Attachment
         </a>
       `;
@@ -149,8 +147,8 @@ async function loadCaregiverMedical(petId, tokenData, container) {
       <div class="timeline-dot"></div>
       <div class="glass-card timeline-content" style="box-shadow:none; border-color:var(--border-glass);">
         <span class="timeline-date">${formatFriendlyDate(record.visit_date)}</span>
-        <h4 class="timeline-title">${record.title}</h4>
-        <p class="timeline-body">${record.description || ''}</p>
+        <h4 class="timeline-title">${escapeHTML(record.title)}</h4>
+        <p class="timeline-body">${escapeHTML(record.description || '')}</p>
         ${attachmentMarkup}
       </div>
     `;
@@ -189,8 +187,8 @@ async function loadCaregiverReminders(petId, tokenData, container) {
              data-id="${id}" data-status="${reminder.is_completed}" style="${canToggle ? '' : 'cursor:not-allowed; opacity:0.6;'}">
         </div>
         <div class="reminder-info">
-          <span class="reminder-title">${reminder.title}</span>
-          <span class="reminder-meta">${reminder.reminder_type} &bull; Due: ${formatFriendlyDate(dueDateOnly)}</span>
+          <span class="reminder-title">${escapeHTML(reminder.title)}</span>
+          <span class="reminder-meta">${escapeHTML(reminder.reminder_type)} &bull; Due: ${formatFriendlyDate(dueDateOnly)}</span>
         </div>
       </div>
       ${isOverdue ? `<span class="badge-overdue">OVERDUE</span>` : ''}
@@ -214,9 +212,10 @@ async function loadCaregiverReminders(petId, tokenData, container) {
           });
 
           const { error } = await supabase
-            .from('caregiver_tokens')
-            .update({ reminders: updatedReminders })
-            .eq('id', tokenData.id);
+            .rpc('update_caregiver_token_data', {
+              p_token_id: tokenData.id,
+              p_reminders: updatedReminders
+            });
           if (error) throw error;
 
           // Also sync the real reminder row directly, since the caregiver
@@ -282,8 +281,8 @@ function loadCaregiverJournalList(tokenData, timelineContainer) {
 
   entries.forEach(record => {
     let img = '';
-    if (record.photo) {
-      img = `<img src="${record.photo}" style="max-width:200px; border-radius:var(--radius-sm); margin-top:0.5rem; display:block;">`;
+    if (record.photo && isSafeHttpUrl(record.photo)) {
+      img = `<img src="${escapeHTML(record.photo)}" style="max-width:200px; border-radius:var(--radius-sm); margin-top:0.5rem; display:block;">`;
     }
     const item = document.createElement('div');
     item.className = 'timeline-item';
@@ -291,7 +290,7 @@ function loadCaregiverJournalList(tokenData, timelineContainer) {
       <div class="timeline-dot" style="background:var(--terracotta);"></div>
       <div class="glass-card timeline-content" style="box-shadow:none; border-color:var(--border-glass);">
         <span class="timeline-date">${formatFriendlyDate(record.date)}</span>
-        <p class="timeline-body">${record.notes}</p>
+        <p class="timeline-body">${escapeHTML(record.notes)}</p>
         ${img}
       </div>
     `;
@@ -356,9 +355,10 @@ function showCaregiverJournalModal(petId, tokenData, timelineContainer) {
         const updatedJournal = [newEntry, ...(tokenData.journalEntries || [])];
 
         const { error } = await supabase
-          .from('caregiver_tokens')
-          .update({ journal_entries: updatedJournal })
-          .eq('id', tokenData.id);
+          .rpc('update_caregiver_token_data', {
+            p_token_id: tokenData.id,
+            p_journal_entries: updatedJournal
+          });
         if (error) throw error;
 
         // Best-effort sync into the real journal_entries table right away

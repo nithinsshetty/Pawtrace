@@ -3,8 +3,7 @@
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
-import { getCurrentLocation, getGoogleMapsLink, showToast, showLoading, formatFriendlyDate, getPetImageHTML } from './utils.js';
-
+import { getCurrentLocation, getGoogleMapsLink, showToast, showLoading, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
 /**
  * Renders the public scanning route page
  * E.g. #/scan/:id
@@ -63,28 +62,74 @@ export async function renderScanPage(params) {
     };
 
     const safePet = {
-      id: rawPet.id,
-      name: rawPet.name,
-      petType: rawPet.species,
-      breed: (isLost || privacy.breed !== false) ? rawPet.breed : null,
-      gender: rawPet.gender,
-      profileImage: rawPet.photo_url,
-      pawTraceId: rawPet.pawtrace_id,
-      lostStatus: isLost ? 'LOST' : 'SAFE',
-      ownerId: rawPet.owner_id,
-      microchipId: (isLost || privacy.microchipId !== false) ? rawPet.microchip_id : null,
+  id: rawPet.id,
+  name: escapeHTML(rawPet.name),
+  petType: escapeHTML(rawPet.species),
+  breed: (isLost || privacy.breed !== false)
+    ? escapeHTML(rawPet.breed)
+    : null,
+  gender: escapeHTML(rawPet.gender),
+  profileImage: escapeHTML(rawPet.photo_url),
+  pawTraceId: escapeHTML(rawPet.pawtrace_id),
+  lostStatus: 'LOST',
+  ownerId: rawPet.owner_id,
 
-      ownerName: (isLost || privacy.ownerName !== false) ? (rawPet.owner_name || "Ecosystem Owner") : null,
-      ownerPhone: (isLost || privacy.phoneNumber !== false) ? (rawPet.recovery_contact || rawPet.owner_phone || rawPet.emergency_contact) : null,
-      emergencyContact: (isLost || privacy.emergencyContact !== false) ? rawPet.emergency_contact : null,
-      address: (isLost || privacy.address !== false) ? (rawPet.address ? `${rawPet.address}${rawPet.city ? ', ' + rawPet.city : ''}${rawPet.state ? ', ' + rawPet.state : ''}` : null) : null,
-      medicalNotes: (isLost || privacy.medicalInfo !== false) ? (rawPet.medical_notes || rawPet.allergies || rawPet.conditions) : null,
-      vaccinationStatus: (isLost || privacy.vaccinationStatus !== false) ? rawPet.vaccination_status : null,
+  microchipId: (isLost || privacy.microchipId !== false)
+    ? escapeHTML(rawPet.microchip_id)
+    : null,
 
-      recoveryContact: rawPet.recovery_contact || rawPet.owner_phone || rawPet.emergency_contact,
-      recoveryInstructions: rawPet.recovery_instructions,
-      rewardAmount: rawPet.reward_amount
-    };
+  ownerName: (isLost || privacy.ownerName !== false)
+    ? escapeHTML(rawPet.owner_name || "Ecosystem Owner")
+    : null,
+
+  ownerPhone: (isLost || privacy.phoneNumber !== false)
+    ? escapeHTML(
+        rawPet.recovery_contact ||
+        rawPet.owner_phone ||
+        rawPet.emergency_contact
+      )
+    : null,
+
+  emergencyContact: (isLost || privacy.emergencyContact !== false)
+    ? escapeHTML(rawPet.emergency_contact)
+    : null,
+
+  address: (isLost || privacy.address !== false)
+    ? (
+        rawPet.address
+          ? escapeHTML(
+              `${rawPet.address}${
+                rawPet.city ? ', ' + rawPet.city : ''
+              }${
+                rawPet.state ? ', ' + rawPet.state : ''
+              }`
+            )
+          : null
+      )
+    : null,
+
+  medicalNotes: (isLost || privacy.medicalInfo !== false)
+    ? escapeHTML(
+        rawPet.medical_notes ||
+        rawPet.allergies ||
+        rawPet.conditions
+      )
+    : null,
+
+  vaccinationStatus: (isLost || privacy.vaccinationStatus !== false)
+    ? escapeHTML(rawPet.vaccination_status)
+    : null,
+
+  recoveryContact: escapeHTML(
+    rawPet.recovery_contact ||
+    rawPet.owner_phone ||
+    rawPet.emergency_contact
+  ),
+
+  recoveryInstructions: escapeHTML(rawPet.recovery_instructions),
+
+  rewardAmount: escapeHTML(rawPet.reward_amount)
+};
 
     viewport.innerHTML = `
       <div class="auth-wrapper" style="min-height: calc(100vh - 70px); padding: 1rem 0;">
@@ -115,7 +160,7 @@ export async function renderScanPage(params) {
 
           <div style="display:flex; flex-direction:column; align-items:center; text-align:center; gap:1rem;">
             <div style="width:120px; height:120px; border-radius: var(--radius-md); overflow:hidden; border: 3px solid ${isLost ? 'var(--accent-red)' : 'var(--teal)'}; position: relative;">
-              ${getPetImageHTML(safePet, 'large')}
+              ${getPetImageHTML({ name: rawPet.name, petType: rawPet.species, profileImage: rawPet.photo_url }, 'large')}
             </div>
 
             <div>
