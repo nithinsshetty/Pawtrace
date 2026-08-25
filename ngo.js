@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, uploadToStorage, escapeHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, uploadToStorage, escapeHTML, safeUrlOrEmpty } from './utils.js';
 let activeNgoTab = 'dashboard';
 
 export async function renderNGO() {
@@ -167,17 +167,19 @@ async function loadCensusList(orgId, container) {
     const card = document.createElement('div');
     card.className = 'glass-card pet-card';
     const badgeColor = a.intake_status === 'SHELTERED' ? '#3f8efc' : a.intake_status === 'FOSTERED' ? 'var(--accent-yellow)' : a.intake_status === 'MEDICAL_REHAB' ? 'var(--accent-red)' : a.intake_status === 'ADOPTED' ? 'var(--accent-green)' : '#7f8c8d';
+    // FIX (XSS): validate a.photo_url before img src; escape intake_status.
+    const safePhoto = safeUrlOrEmpty(a.photo_url);
     card.innerHTML = `
       <div class="pet-image-container" style="height:150px; background:#e5e7eb; display:flex; align-items:center; justify-content:center;">
-        ${a.photo_url ? `<img src="${a.photo_url}" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fa-solid fa-paw fa-2x" style="color:var(--text-muted);"></i>`}
-        <span class="pet-status-badge" style="background:${badgeColor}; text-transform:uppercase; font-size:0.6rem;">${a.intake_status}</span>
+        ${safePhoto ? `<img src="${escapeHTML(safePhoto)}" style="width:100%; height:100%; object-fit:cover;">` : `<i class="fa-solid fa-paw fa-2x" style="color:var(--text-muted);"></i>`}
+        <span class="pet-status-badge" style="background:${badgeColor}; text-transform:uppercase; font-size:0.6rem;">${escapeHTML(a.intake_status || '')}</span>
       </div>
             <div class="pet-card-content">
         <h4 class="pet-card-name">${escapeHTML(a.pet_name)}</h4>
         <div class="pet-card-meta" style="font-size:0.75rem; color:var(--text-muted);"><span>${escapeHTML(a.species || '')} &bull; ${escapeHTML(a.breed || 'Unknown')}</span></div>
         <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
-          <button class="btn btn-outline btn-manage-animal" data-id="${a.id}" style="flex:1; font-size:0.75rem; padding:0.4rem;">Manage</button>
-          ${a.status === 'available' ? `<span class="pet-status-badge safe" style="position:static; font-size:0.6rem;">ON BOARD</span>` : `<button class="btn btn-secondary btn-publish-animal" data-id="${a.id}" style="flex:1; font-size:0.75rem; padding:0.4rem;">Publish</button>`}
+          <button class="btn btn-outline btn-manage-animal" data-id="${escapeHTML(a.id)}" style="flex:1; font-size:0.75rem; padding:0.4rem;">Manage</button>
+          ${a.status === 'available' ? `<span class="pet-status-badge safe" style="position:static; font-size:0.6rem;">ON BOARD</span>` : `<button class="btn btn-secondary btn-publish-animal" data-id="${escapeHTML(a.id)}" style="flex:1; font-size:0.75rem; padding:0.4rem;">Publish</button>`}
         </div>
       </div>
     `;
@@ -377,7 +379,7 @@ async function renderFosters(container, orgId) {
           <span class="pet-status-badge safe" style="position:static; font-size:0.6rem; background:${f.availability_status === 'AVAILABLE' ? 'var(--accent-green)' : 'var(--accent-yellow)'};">${escapeHTML(f.availability_status)}</span>
         </div>
         <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHTML(f.phone || '')} ${f.email ? '&bull; ' + escapeHTML(f.email) : ''}</div>
-        <div style="font-size:0.75rem; color:var(--text-muted);">Capacity: ${(f.current_placements || []).length}/${f.max_capacity}</div>
+        <div style="font-size:0.75rem; color:var(--text-muted);">Capacity: ${(f.current_placements || []).length}/${escapeHTML(String(f.max_capacity))}</div>
       </div>
     `).join('');
   };
@@ -471,14 +473,14 @@ async function renderAdoptionApplications(container, orgId) {
     const badgeColor = app.status === 'PENDING' ? 'var(--accent-yellow)' : app.status === 'APPROVED' ? 'var(--accent-green)' : app.status === 'COMPLETED' ? '#2a9d8f' : 'var(--accent-red)';
     const actions = app.status === 'PENDING' ? `
       <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
-        <button class="btn btn-primary btn-approve-app" data-id="${app.id}" style="font-size:0.75rem;">Approve</button>
-        <button class="btn btn-danger btn-reject-app" data-id="${app.id}" style="font-size:0.75rem;">Reject</button>
+        <button class="btn btn-primary btn-approve-app" data-id="${escapeHTML(app.id)}" style="font-size:0.75rem;">Approve</button>
+        <button class="btn btn-danger btn-reject-app" data-id="${escapeHTML(app.id)}" style="font-size:0.75rem;">Reject</button>
       </div>` : '';
     return `
       <div class="glass-card" style="padding:1.25rem;">
         <div class="flex-between">
           <strong style="color:var(--teal);">${escapeHTML(app.rescued_animals?.pet_name || 'Animal')}</strong>
-          <span class="pet-status-badge safe" style="position:static; font-size:0.65rem; background:${badgeColor};">${app.status}</span>
+          <span class="pet-status-badge safe" style="position:static; font-size:0.65rem; background:${badgeColor};">${escapeHTML(app.status)}</span>
         </div>
         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem; line-height:1.4;">
           <div><strong>Applicant:</strong> ${escapeHTML(app.applicant_name)} (${escapeHTML(app.applicant_phone)})</div>
@@ -535,19 +537,19 @@ async function renderStrayReports(container, orgId) {
     <div class="glass-card" style="padding:1.25rem;">
       <div class="flex-between">
         <strong>${escapeHTML(r.reporter_name || 'Anonymous Reporter')}</strong>
-        <span class="pet-status-badge ${r.status === 'reported' ? 'lost' : 'safe'}" style="position:static; font-size:0.65rem;">${r.status.toUpperCase()}</span>
+        <span class="pet-status-badge ${r.status === 'reported' ? 'lost' : 'safe'}" style="position:static; font-size:0.65rem;">${escapeHTML((r.status || '').toUpperCase())}</span>
       </div>
       <p style="font-size:0.8rem; color:var(--text-muted); margin:0.5rem 0;">${escapeHTML(r.description || '')}</p>
-      <div style="font-size:0.75rem; color:var(--text-muted);">Contact: ${escapeHTML(r.reporter_contact || 'N/A')} &bull; Urgency: ${r.urgency}</div>
+      <div style="font-size:0.75rem; color:var(--text-muted);">Contact: ${escapeHTML(r.reporter_contact || 'N/A')} &bull; Urgency: ${escapeHTML(r.urgency || '')}</div>
       ${r.status === 'reported' ? `
         <div style="display:flex; gap:0.5rem; margin-top:0.75rem; align-items:center;">
-          <select class="form-control assign-vol-select" data-id="${r.id}" style="font-size:0.75rem; flex:1;">
+          <select class="form-control assign-vol-select" data-id="${escapeHTML(r.id)}" style="font-size:0.75rem; flex:1;">
             <option value="">Assign volunteer...</option>
-            ${(vols || []).map(v => `<option value="${v.id}|${v.name}">${v.name}</option>`).join('')}
+            ${(vols || []).map(v => `<option value="${escapeHTML(v.id)}|${escapeHTML(v.name)}">${escapeHTML(v.name)}</option>`).join('')}
           </select>
-          <button class="btn btn-primary btn-assign-vol" data-id="${r.id}" style="font-size:0.75rem;">Assign</button>
+          <button class="btn btn-primary btn-assign-vol" data-id="${escapeHTML(r.id)}" style="font-size:0.75rem;">Assign</button>
         </div>
-      ` : `<div style="font-size:0.75rem; margin-top:0.5rem; color:var(--teal);">Assigned to: ${r.assigned_volunteer_name || 'N/A'}</div>`}
+      ` : `<div style="font-size:0.75rem; margin-top:0.5rem; color:var(--teal);">Assigned to: ${escapeHTML(r.assigned_volunteer_name || 'N/A')}</div>`}
     </div>
   `).join('');
 

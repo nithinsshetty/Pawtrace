@@ -1,7 +1,7 @@
 // adoptions-client.js — Supabase version
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, getPetImageHTML, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, getPetImageHTML, formatFriendlyDate, escapeHTML } from './utils.js';
 
 let activeSubTab = 'browse';
 
@@ -60,7 +60,7 @@ function renderAdoptionLoginPrompt(container, titleText) {
     <div class="glass-card" style="text-align:center; padding:3rem 1.5rem; margin-top:1rem;">
       <i class="fa-solid fa-user-lock" style="font-size:2.5rem; color:var(--terracotta); margin-bottom:1rem; opacity:0.8;"></i>
       <h3 style="font-family:'Outfit'; font-weight:700;">Account Authentication Required</h3>
-      <p style="font-size:0.85rem; color:var(--text-muted); max-width:440px; margin:0.5rem auto 1.5rem auto; line-height:1.4;">In order to ${titleText.toLowerCase()}, save favorite companions across sessions, or submit adoption questionnaires, you must log in.</p>
+      <p style="font-size:0.85rem; color:var(--text-muted); max-width:440px; margin:0.5rem auto 1.5rem auto; line-height:1.4;">In order to ${escapeHTML(titleText.toLowerCase())}, save favorite companions across sessions, or submit adoption questionnaires, you must log in.</p>
       <div style="display:flex; justify-content:center; gap:0.5rem;"><a href="#/login" class="btn btn-primary">Log In</a><a href="#/signup" class="btn btn-outline">Create Account</a></div>
     </div>
   `;
@@ -129,6 +129,8 @@ async function loadAdoptableListings(user, search = '', species = 'ALL', gender 
 
     const favs = await getSavedFavorites(user);
 
+    // FIX (XSS): animal.petName / breed / age were inserted raw into
+    // multiple cards throughout this file — all escaped now.
     items.forEach(animal => {
       const isFav = favs.includes(animal.id);
       const card = document.createElement('div');
@@ -136,15 +138,15 @@ async function loadAdoptableListings(user, search = '', species = 'ALL', gender 
       card.innerHTML = `
         <div class="pet-image-container" style="position: relative; height:160px;">
           ${getPetImageHTML(animal, 'small')}
-          <button class="btn-favorite" data-id="${animal.id}" style="position:absolute; top:10px; right:10px; border:none; background:rgba(255,255,255,0.75); width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:${isFav ? 'var(--accent-red)' : 'var(--text-muted)'};"><i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-heart"></i></button>
+          <button class="btn-favorite" data-id="${escapeHTML(animal.id)}" style="position:absolute; top:10px; right:10px; border:none; background:rgba(255,255,255,0.75); width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:${isFav ? 'var(--accent-red)' : 'var(--text-muted)'};"><i class="${isFav ? 'fa-solid' : 'fa-regular'} fa-heart"></i></button>
           <span class="pet-status-badge safe" style="background:var(--teal)">ADOPTABLE</span>
         </div>
         <div class="pet-card-content" style="padding:1rem;">
-          <h4 class="pet-card-name" style="font-family:'Outfit'; font-weight:700; margin-bottom:0.25rem;">${animal.petName}</h4>
+          <h4 class="pet-card-name" style="font-family:'Outfit'; font-weight:700; margin-bottom:0.25rem;">${escapeHTML(animal.petName)}</h4>
           <div class="pet-card-meta" style="flex-direction:column; gap:0.25rem; font-size:0.75rem; color:var(--text-muted); border-bottom:1px solid rgba(0,0,0,0.03); padding-bottom:0.5rem; margin-bottom:0.5rem;">
-            <span><strong>Breed:</strong> ${animal.breed}</span><span><strong>Age:</strong> ${animal.age}</span>
+            <span><strong>Breed:</strong> ${escapeHTML(animal.breed)}</span><span><strong>Age:</strong> ${escapeHTML(animal.age)}</span>
           </div>
-          <button class="btn btn-primary btn-full btn-view-adoption-profile" data-id="${animal.id}"><i class="fa-solid fa-file-invoice"></i> View Profile</button>
+          <button class="btn btn-primary btn-full btn-view-adoption-profile" data-id="${escapeHTML(animal.id)}"><i class="fa-solid fa-file-invoice"></i> View Profile</button>
         </div>
       `;
       grid.appendChild(card);
@@ -164,20 +166,20 @@ async function loadAdoptableListings(user, search = '', species = 'ALL', gender 
 
 function showAdoptionProfileModal(animal, user) {
   showModal({
-    title: `Adoption Profile: ${animal.petName}`,
+    title: `Adoption Profile: ${escapeHTML(animal.petName)}`,
     bodyHtml: `
       <div class="grid-split" style="max-height:480px; overflow-y:auto;">
         <div>
           <div class="pet-image-container mb-2" style="height:150px; border-radius:var(--radius-md); overflow:hidden;">${getPetImageHTML(animal, 'small')}</div>
           <h4 style="font-family:'Outfit'; font-weight:700; font-size:1.05rem; margin-bottom:0.5rem;">Bio Attributes</h4>
           <div style="font-size:0.75rem; color:var(--text-muted); display:flex; flex-direction:column; gap:0.4rem;">
-            <span><strong>Species:</strong> ${animal.type || 'Companion'}</span><span><strong>Breed:</strong> ${animal.breed}</span>
-            <span><strong>Age:</strong> ${animal.age}</span><span><strong>Gender:</strong> ${animal.gender}</span><span><strong>Size:</strong> ${animal.size || 'Medium'}</span>
+            <span><strong>Species:</strong> ${escapeHTML(animal.type || 'Companion')}</span><span><strong>Breed:</strong> ${escapeHTML(animal.breed)}</span>
+            <span><strong>Age:</strong> ${escapeHTML(animal.age)}</span><span><strong>Gender:</strong> ${escapeHTML(animal.gender)}</span><span><strong>Size:</strong> ${escapeHTML(animal.size || 'Medium')}</span>
           </div>
         </div>
         <div>
           <h4 style="font-family:'Outfit'; font-weight:700; font-size:1.05rem; margin-bottom:0.4rem;">Personality & Background</h4>
-          <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4; margin-bottom:1.5rem;">${animal.description || 'This animal has no descriptive logs registered.'}</p>
+          <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.4; margin-bottom:1.5rem;">${escapeHTML(animal.description || 'This animal has no descriptive logs registered.')}</p>
           <button id="btn-apply-adopt-modal" class="btn btn-primary btn-full"><i class="fa-solid fa-file-invoice"></i> Submit Adoption Application</button>
         </div>
       </div>
@@ -194,11 +196,11 @@ function showAdoptionProfileModal(animal, user) {
 
 function showApplicationFormModal(animal, user) {
   showModal({
-    title: `Apply to Adopt: ${animal.petName}`,
+    title: `Apply to Adopt: ${escapeHTML(animal.petName)}`,
     bodyHtml: `
       <form id="adoption-submit-form" style="display:flex; flex-direction:column; gap:0.85rem; max-height:450px; overflow-y:auto;">
         <div class="form-row">
-          <div class="form-group"><label>Applicant Full Name *</label><input type="text" id="app-form-name" class="form-control" required value="${user.displayName || ''}"></div>
+          <div class="form-group"><label>Applicant Full Name *</label><input type="text" id="app-form-name" class="form-control" required value="${escapeHTML(user.displayName || '')}"></div>
           <div class="form-group"><label>Contact Phone *</label><input type="tel" id="app-form-phone" class="form-control" required></div>
         </div>
         <div class="form-group"><label>City / Location *</label><input type="text" id="app-form-city" class="form-control" required></div>
@@ -269,10 +271,10 @@ async function renderSavedWishlist(container, user) {
       card.className = 'glass-card pet-card magnetic-card';
       card.innerHTML = `
         <div class="pet-image-container" style="position: relative; height:160px;">${getPetImageHTML(animal, 'small')}
-          <button class="btn-remove-favorite" data-id="${animal.id}" style="position:absolute; top:10px; right:10px; border:none; background:rgba(255,255,255,0.75); width:32px; height:32px; border-radius:50%; color:var(--accent-red);"><i class="fa-solid fa-heart"></i></button>
+          <button class="btn-remove-favorite" data-id="${escapeHTML(animal.id)}" style="position:absolute; top:10px; right:10px; border:none; background:rgba(255,255,255,0.75); width:32px; height:32px; border-radius:50%; color:var(--accent-red);"><i class="fa-solid fa-heart"></i></button>
         </div>
-        <div class="pet-card-content" style="padding:1rem;"><h4 style="font-family:'Outfit'; font-weight:700;">${animal.petName}</h4>
-          <button class="btn btn-primary btn-full btn-view-adoption-profile" data-id="${animal.id}">View Profile</button>
+        <div class="pet-card-content" style="padding:1rem;"><h4 style="font-family:'Outfit'; font-weight:700;">${escapeHTML(animal.petName)}</h4>
+          <button class="btn btn-primary btn-full btn-view-adoption-profile" data-id="${escapeHTML(animal.id)}">View Profile</button>
         </div>
       `;
       grid.appendChild(card);
@@ -299,11 +301,11 @@ async function renderMyApplications(container, user) {
         if (app.status === 'APPROVED') { badgeColor = 'var(--accent-green)'; statusText = 'APPROVED - PENDING CONFIRMATION'; }
         else if (app.status === 'COMPLETED') { badgeColor = '#2a9d8f'; statusText = 'ADOPTION COMPLETED'; }
         else if (app.status === 'REJECTED') { badgeColor = 'var(--accent-red)'; }
-        const confirmBtn = app.status === 'APPROVED' ? `<div style="margin-top:1rem; display:flex; justify-content:flex-end;"><button class="btn btn-primary btn-confirm-adoption" data-id="${app.id}"><i class="fa-solid fa-circle-check"></i> Confirm Adoption</button></div>` : '';
+        const confirmBtn = app.status === 'APPROVED' ? `<div style="margin-top:1rem; display:flex; justify-content:flex-end;"><button class="btn btn-primary btn-confirm-adoption" data-id="${escapeHTML(app.id)}"><i class="fa-solid fa-circle-check"></i> Confirm Adoption</button></div>` : '';
         return `<div class="glass-card" style="padding:1.25rem;">
           <div style="display:flex; justify-content:space-between; margin-bottom:0.75rem;">
-            <h4 style="font-family:'Outfit'; font-weight:700; color:var(--teal); margin:0;">${app.rescued_animals?.pet_name || 'Companion'}</h4>
-            <span class="pet-status-badge safe" style="background:${badgeColor}; position:static; font-size:0.65rem;">${statusText}</span>
+            <h4 style="font-family:'Outfit'; font-weight:700; color:var(--teal); margin:0;">${escapeHTML(app.rescued_animals?.pet_name || 'Companion')}</h4>
+            <span class="pet-status-badge safe" style="background:${badgeColor}; position:static; font-size:0.65rem;">${escapeHTML(statusText)}</span>
           </div>
           <span style="font-size:0.7rem; color:var(--text-muted);">Filed: ${formatFriendlyDate(app.created_at)}</span>
           ${confirmBtn}
@@ -320,7 +322,7 @@ async function renderMyApplications(container, user) {
 function showConfirmTransferModal(app, user) {
   showModal({
     title: "Accept Ownership Companion",
-    bodyHtml: `<div style="padding:0.5rem 0; font-size:0.85rem;"><p>Confirming finalizes adoption for <strong>${app.rescued_animals?.pet_name}</strong>: creates a live pet profile, transfers custody, closes the application.</p></div>`,
+    bodyHtml: `<div style="padding:0.5rem 0; font-size:0.85rem;"><p>Confirming finalizes adoption for <strong>${escapeHTML(app.rescued_animals?.pet_name || '')}</strong>: creates a live pet profile, transfers custody, closes the application.</p></div>`,
     confirmText: "Confirm & Accept Companion",
     onConfirm: async () => {
       showLoading(true, "Executing transfer...");
@@ -440,14 +442,17 @@ async function evaluateAdoptionMatching(user) {
     }).sort((a, b) => b.match.score - a.match.score);
 
     loader.classList.add('hidden');
+    // FIX (XSS): petName / description escaped. warnings[] are always
+    // fixed app-defined strings (never user input), but escaped anyway
+    // for defense-in-depth.
     matches.slice(0, 3).forEach(pet => {
       let badgeColor = pet.match.score < 50 ? 'var(--accent-red)' : pet.match.score < 80 ? 'var(--accent-yellow)' : 'var(--accent-green)';
       resultsBox.innerHTML += `
         <div class="glass-card" style="padding:1rem; border-left:4px solid ${badgeColor};">
-          <div class="flex-between"><strong style="font-family:'Outfit'; color:var(--teal);">${pet.petName}</strong><span style="font-weight:800; color:${badgeColor};">${pet.match.score}% Match</span></div>
-          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.4rem;">${pet.description || ''}</p>
-          ${pet.match.warnings.length > 0 ? `<div style="font-size:0.7rem; background:rgba(239,68,68,0.05); color:var(--accent-red); padding:0.4rem 0.6rem; border-radius:var(--radius-sm); margin-top:0.5rem;">⚠️ ${pet.match.warnings.join(' ')}</div>` : ''}
-          <div style="margin-top:0.5rem; text-align:right;"><button class="btn btn-outline btn-view-adoption-profile-match" data-id="${pet.id}" style="font-size:0.7rem;">View Profile</button></div>
+          <div class="flex-between"><strong style="font-family:'Outfit'; color:var(--teal);">${escapeHTML(pet.petName)}</strong><span style="font-weight:800; color:${badgeColor};">${pet.match.score}% Match</span></div>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.4rem;">${escapeHTML(pet.description || '')}</p>
+          ${pet.match.warnings.length > 0 ? `<div style="font-size:0.7rem; background:rgba(239,68,68,0.05); color:var(--accent-red); padding:0.4rem 0.6rem; border-radius:var(--radius-sm); margin-top:0.5rem;">⚠️ ${escapeHTML(pet.match.warnings.join(' '))}</div>` : ''}
+          <div style="margin-top:0.5rem; text-align:right;"><button class="btn btn-outline btn-view-adoption-profile-match" data-id="${escapeHTML(pet.id)}" style="font-size:0.7rem;">View Profile</button></div>
         </div>
       `;
     });

@@ -3,7 +3,7 @@
 // ==========================================================================
 
 import { supabase } from './supabase-config.js';
-import { getCurrentLocation, getGoogleMapsLink, showToast, showLoading, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
+import { getCurrentLocation, getGoogleMapsLink, showToast, showLoading, formatFriendlyDate, getPetImageHTML, escapeHTML, sanitizePhoneForHref } from './utils.js';
 /**
  * Renders the public scanning route page
  * E.g. #/scan/:id
@@ -131,6 +131,13 @@ export async function renderScanPage(params) {
   rewardAmount: escapeHTML(rawPet.reward_amount)
 };
 
+    // FIX (XSS): tel: hrefs must not simply reuse the already-escaped
+    // display text — escapeHTML() prevents markup breakout but does not
+    // validate URI schemes. sanitizePhoneForHref() strips the raw phone
+    // value down to digits/+/-/()/space before it's placed in href="tel:...".
+    const telRecovery = sanitizePhoneForHref(rawPet.recovery_contact || rawPet.owner_phone || rawPet.emergency_contact);
+    const telOwner = sanitizePhoneForHref(rawPet.owner_phone || rawPet.emergency_contact);
+
     viewport.innerHTML = `
       <div class="auth-wrapper" style="min-height: calc(100vh - 70px); padding: 1rem 0;">
         <div class="glass-card" style="width:100%; max-width:550px; padding:2rem; margin:1rem;">
@@ -185,7 +192,7 @@ export async function renderScanPage(params) {
             ${isLost ? `
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">RECOVERY CONTACT NUMBER</span>
-                <a href="tel:${safePet.recoveryContact || safePet.ownerPhone}" class="btn btn-primary btn-full" style="margin-top:0.35rem; padding:0.6rem 0.85rem; background:var(--teal); border:none; display: flex; flex-direction: column; gap: 0.15rem; align-items: center; justify-content: center; height: auto;">
+                <a href="tel:${telRecovery}" class="btn btn-primary btn-full" style="margin-top:0.35rem; padding:0.6rem 0.85rem; background:var(--teal); border:none; display: flex; flex-direction: column; gap: 0.15rem; align-items: center; justify-content: center; height: auto;">
                   <span style="font-size: 0.8rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone-flip fa-shake"></i> Call Recovery Contact</span>
                   <span style="font-size: 1.05rem; font-weight: 800;">${safePet.recoveryContact || safePet.ownerPhone}</span>
                 </a>
@@ -217,7 +224,7 @@ export async function renderScanPage(params) {
             ` : (safePet.ownerPhone || safePet.emergencyContact) ? `
               <div>
                 <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">PRIMARY EMERGENCY PHONE</span>
-                <a href="tel:${safePet.ownerPhone || safePet.emergencyContact}" class="btn btn-secondary btn-full" style="margin-top:0.35rem; padding:0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.15rem; align-items: center; justify-content: center; height: auto;">
+                <a href="tel:${telOwner}" class="btn btn-secondary btn-full" style="margin-top:0.35rem; padding:0.6rem 0.85rem; display: flex; flex-direction: column; gap: 0.15rem; align-items: center; justify-content: center; height: auto;">
                   <span style="font-size: 0.8rem; font-weight: 500; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone-flip"></i> Call Owner</span>
                   <span style="font-size: 1rem; font-weight: 800;">${safePet.ownerPhone || safePet.emergencyContact}</span>
                 </a>

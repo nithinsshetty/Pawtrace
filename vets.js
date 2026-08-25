@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, getCurrentLocation, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, getCurrentLocation, formatFriendlyDate, escapeHTML, sanitizePhoneForHref } from './utils.js';
 
 let vetsMap = null;
 let vetsMarkers = [];
@@ -208,10 +208,11 @@ async function loadOwnerAppointments() {
   const { data: apps } = await supabase.from('appointments').select('*').eq('owner_id', user.uid).order('created_at', { ascending: false });
   const container = document.getElementById('owner-appointments-list');
   if (!apps || apps.length === 0) { container.innerHTML = `<p style="font-size:0.8rem; color:var(--text-muted);">No appointments booked yet.</p>`; return; }
+  // FIX (XSS): pet name, vet name, and status were inserted raw — escaped now.
   container.innerHTML = apps.map(a => `
     <div style="display:flex; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border-glass); font-size:0.8rem;">
-      <span>${a.pets?.name || 'Pet'} — ${a.vet_name} on ${formatFriendlyDate(a.appointment_date)}</span>
-      <strong style="text-transform:capitalize; color:${a.status==='accepted'?'var(--accent-green)':a.status==='rejected'?'var(--accent-red)':'var(--accent-yellow)'};">${a.status}</strong>
+      <span>${escapeHTML(a.pets?.name || 'Pet')} — ${escapeHTML(a.vet_name || '')} on ${formatFriendlyDate(a.appointment_date)}</span>
+      <strong style="text-transform:capitalize; color:${a.status==='accepted'?'var(--accent-green)':a.status==='rejected'?'var(--accent-red)':'var(--accent-yellow)'};">${escapeHTML(a.status)}</strong>
     </div>
   `).join('');
 }
@@ -259,19 +260,31 @@ function renderVetsMapAndList(userLat, userLng) {
 
   const selectClinic = document.getElementById('app-select-clinic');
   if (selectClinic) {
+    // FIX (XSS): vet.name (from owner-controlled vet_details JSON) escaped
+    // before insertion into <option>.
     selectClinic.innerHTML = activeClinics.map(v =>
-      `<option value="${v.id}">${v.name} (${v.distance.toFixed(1)} km away)</option>`
+      `<option value="${escapeHTML(v.id)}">${escapeHTML(v.name)} (${v.distance.toFixed(1)} km away)</option>`
     ).join('');
   }
 
   activeClinics.forEach(vet => {
+    // FIX (XSS): all vet_details-derived fields (name, special, address,
+    // availability, phone) escaped before insertion into map popups and
+    // list cards; tel: hrefs now use sanitizePhoneForHref().
+    const safeName = escapeHTML(vet.name);
+    const safeSpecial = escapeHTML(vet.special);
+    const safeAddress = escapeHTML(vet.address);
+    const safeAvailability = escapeHTML(vet.availability);
+    const safePhoneDisplay = escapeHTML(vet.phone);
+    const safePhoneHref = sanitizePhoneForHref(vet.phone);
+
     const popupText = `
       <div style="font-family:'Outfit',sans-serif; font-size:0.8rem; line-height:1.4; padding:0.1rem;">
-        <strong style="font-size:0.85rem;">${vet.name}</strong><br>
-        <span style="color:var(--text-muted);">${vet.special}</span><br>
-        <span style="color:var(--text-muted); font-size:0.75rem;"><i class="fa-solid fa-map-marker-alt"></i> ${vet.address}</span><br>
-        <strong>Hours:</strong> ${vet.availability}<br>
-        <strong>Phone:</strong> <a href="tel:${vet.phone}">${vet.phone}</a>
+        <strong style="font-size:0.85rem;">${safeName}</strong><br>
+        <span style="color:var(--text-muted);">${safeSpecial}</span><br>
+        <span style="color:var(--text-muted); font-size:0.75rem;"><i class="fa-solid fa-map-marker-alt"></i> ${safeAddress}</span><br>
+        <strong>Hours:</strong> ${safeAvailability}<br>
+        <strong>Phone:</strong> <a href="tel:${safePhoneHref}">${safePhoneDisplay}</a>
       </div>
     `;
 
@@ -306,37 +319,37 @@ function renderVetsMapAndList(userLat, userLng) {
 
     const statusInfo = getOpenStatus(vet.availability);
     const statusHTML = statusInfo.open
-      ? `<span style="font-size:0.7rem; color:var(--accent-green); font-weight:600; display:inline-flex; align-items:center; gap:0.25rem;"><span style="width:6px; height:6px; background:var(--accent-green); border-radius:50%; display:inline-block;"></span> ${statusInfo.text}</span>`
-      : `<span style="font-size:0.7rem; color:var(--accent-red); font-weight:600; display:inline-flex; align-items:center; gap:0.25rem;"><span style="width:6px; height:6px; background:var(--accent-red); border-radius:50%; display:inline-block;"></span> ${statusInfo.text}</span>`;
+      ? `<span style="font-size:0.7rem; color:var(--accent-green); font-weight:600; display:inline-flex; align-items:center; gap:0.25rem;"><span style="width:6px; height:6px; background:var(--accent-green); border-radius:50%; display:inline-block;"></span> ${escapeHTML(statusInfo.text)}</span>`
+      : `<span style="font-size:0.7rem; color:var(--accent-red); font-weight:600; display:inline-flex; align-items:center; gap:0.25rem;"><span style="width:6px; height:6px; background:var(--accent-red); border-radius:50%; display:inline-block;"></span> ${escapeHTML(statusInfo.text)}</span>`;
 
     card.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:0.5rem; width:100%;">
         <div style="display:flex; justify-content:space-between; width:100%; align-items:flex-start; gap:0.5rem;">
           <div style="display:flex; flex-direction:column; gap:0.25rem;">
             <h4 style="font-size:0.95rem; font-weight:700; margin:0; line-height:1.2; color:var(--text-main); font-family:'Outfit';">
-              ${vet.name}
+              ${safeName}
             </h4>
             <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.15rem;">
               ${distanceHTML}
               ${isEmergencyHTML}
             </div>
           </div>
-          <a href="tel:${vet.phone}" class="icon-btn" style="width:32px; height:32px; font-size:0.8rem; background:rgba(var(--teal-rgb), 0.08); border-color:transparent; color:var(--teal); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:center; flex-shrink:0;" title="Call Clinic" onclick="event.stopPropagation();">
+          <a href="tel:${safePhoneHref}" class="icon-btn" style="width:32px; height:32px; font-size:0.8rem; background:rgba(var(--teal-rgb), 0.08); border-color:transparent; color:var(--teal); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:center; flex-shrink:0;" title="Call Clinic" onclick="event.stopPropagation();">
             <i class="fa-solid fa-phone"></i>
           </a>
         </div>
 
         <div style="font-size:0.75rem; color:var(--text-muted); display:flex; flex-direction:column; gap:0.25rem; line-height:1.4;">
-          <span style="display:inline-flex; align-items:center; gap:0.35rem;"><i class="fa-solid fa-stethoscope" style="width:12px;"></i> ${vet.special}</span>
-          <span style="display:inline-flex; align-items:center; gap:0.35rem;"><i class="fa-solid fa-map-marker-alt" style="width:12px;"></i> ${vet.address}</span>
+          <span style="display:inline-flex; align-items:center; gap:0.35rem;"><i class="fa-solid fa-stethoscope" style="width:12px;"></i> ${safeSpecial}</span>
+          <span style="display:inline-flex; align-items:center; gap:0.35rem;"><i class="fa-solid fa-map-marker-alt" style="width:12px;"></i> ${safeAddress}</span>
           <span style="display:inline-flex; align-items:center; gap:0.35rem;"><i class="fa-solid fa-clock" style="width:12px;"></i> ${statusHTML}</span>
         </div>
 
         <div style="margin-top:0.4rem; display:flex; gap:0.5rem; width:100%;">
-          <a href="https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLng}&destination=${vet.lat},${vet.lng}" target="_blank" class="btn btn-secondary" style="font-size:0.7rem; padding:0.4rem 0.7rem; display:inline-flex; align-items:center; gap:0.35rem; text-decoration:none; flex:1; justify-content:center; border-radius:var(--radius-sm);" onclick="event.stopPropagation();">
+          <a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(userLat)},${encodeURIComponent(userLng)}&destination=${encodeURIComponent(vet.lat)},${encodeURIComponent(vet.lng)}" target="_blank" class="btn btn-secondary" style="font-size:0.7rem; padding:0.4rem 0.7rem; display:inline-flex; align-items:center; gap:0.35rem; text-decoration:none; flex:1; justify-content:center; border-radius:var(--radius-sm);" onclick="event.stopPropagation();">
             <i class="fa-solid fa-diamond-turn-right"></i> Directions
           </a>
-          <button class="btn btn-primary btn-book-now" style="font-size:0.7rem; padding:0.4rem 0.7rem; flex:1; border-radius:var(--radius-sm);" onclick="event.stopPropagation();" data-id="${vet.id}">
+          <button class="btn btn-primary btn-book-now" style="font-size:0.7rem; padding:0.4rem 0.7rem; flex:1; border-radius:var(--radius-sm);" onclick="event.stopPropagation();" data-id="${escapeHTML(vet.id)}">
             Book Consult
           </button>
         </div>
@@ -467,8 +480,9 @@ async function populateAppointmentPets() {
       return;
     }
 
+    // FIX (XSS): pet.name / pet.pawtrace_id escaped before insertion into <option>.
     pets.forEach(pet => {
-      dropdown.innerHTML += `<option value="${pet.id}">${pet.name} (${pet.pawtrace_id})</option>`;
+      dropdown.innerHTML += `<option value="${escapeHTML(pet.id)}">${escapeHTML(pet.name)} (${escapeHTML(pet.pawtrace_id)})</option>`;
     });
 
   } catch (err) {

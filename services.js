@@ -1,6 +1,6 @@
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, escapeHTML } from './utils.js';
 
 export async function renderServices() {
   const viewport = document.getElementById('app-viewport');
@@ -42,18 +42,23 @@ export async function renderServices() {
     if (list.length === 0) { grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><i class="fa-solid fa-handshake-angle"></i><h3>No providers found</h3></div>`; return; }
     grid.innerHTML = '';
     list.forEach(p => {
-      const providerName = p.users?.display_name || 'Provider';
+      // FIX (XSS): providerName / location were inserted raw into both
+      // innerHTML and a data attribute; both now escaped.
+      const providerName = escapeHTML(p.users?.display_name || 'Provider');
+      const providerType = escapeHTML((p.provider_type || '').replace('_', ' '));
+      const location = escapeHTML(p.location || 'N/A');
+      const rate = escapeHTML(String(p.rate ?? ''));
       const card = document.createElement('div');
       card.className = 'glass-card pet-card';
       card.innerHTML = `
         <div class="pet-card-content" style="padding:1.25rem;">
           <h4 style="font-family:'Outfit'; font-weight:700;">${providerName}</h4>
-          <span style="font-size:0.7rem; text-transform:uppercase; font-weight:600; color:var(--teal);">${(p.provider_type || '').replace('_', ' ')}</span>
+          <span style="font-size:0.7rem; text-transform:uppercase; font-weight:600; color:var(--teal);">${providerType}</span>
           <div style="font-size:0.8rem; color:var(--text-muted); margin:0.5rem 0; line-height:1.4;">
-            <div><i class="fa-solid fa-location-dot"></i> ${p.location || 'N/A'}</div>
-            <div><i class="fa-solid fa-indian-rupee-sign"></i> ${p.rate}/hr</div>
+            <div><i class="fa-solid fa-location-dot"></i> ${location}</div>
+            <div><i class="fa-solid fa-indian-rupee-sign"></i> ${rate}/hr</div>
           </div>
-          <button class="btn btn-primary btn-full btn-book-provider" data-id="${p.user_id}" data-name="${providerName}" data-type="${p.provider_type}" style="font-size:0.8rem;">Book Now</button>
+          <button class="btn btn-primary btn-full btn-book-provider" data-id="${escapeHTML(p.user_id)}" data-name="${escapeHTML(p.users?.display_name || 'Provider')}" data-type="${escapeHTML(p.provider_type || '')}" style="font-size:0.8rem;">Book Now</button>
         </div>
       `;
       grid.appendChild(card);
@@ -90,17 +95,19 @@ async function loadMyBookings(user, viewport) {
 
   const petMap = {}; (pets || []).forEach(p => petMap[p.id] = p.name);
 
+  // FIX (XSS): provider display name, pet name, and booking status were
+  // inserted raw — all escaped now.
   container.innerHTML = bookings.map(b => `
     <div style="display:flex; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border-glass); font-size:0.8rem;">
-      <span>${b.users?.display_name || 'Provider'} — ${petMap[b.pet_id] || 'Pet'} on ${formatFriendlyDate(b.booking_date)}</span>
-      <strong style="text-transform:capitalize; color:${b.status==='accepted'?'var(--accent-green)':b.status==='rejected'?'var(--accent-red)':'var(--accent-yellow)'};">${b.status}</strong>
+      <span>${escapeHTML(b.users?.display_name || 'Provider')} — ${escapeHTML(petMap[b.pet_id] || 'Pet')} on ${formatFriendlyDate(b.booking_date)}</span>
+      <strong style="text-transform:capitalize; color:${b.status==='accepted'?'var(--accent-green)':b.status==='rejected'?'var(--accent-red)':'var(--accent-yellow)'};">${escapeHTML(b.status)}</strong>
     </div>
   `).join('');
 }
 
 function showBookingModal(providerId, providerName, providerType, user) {
   showModal({
-    title: `Book ${providerName}`,
+    title: `Book ${escapeHTML(providerName)}`,
     bodyHtml: `
       <form id="svc-booking-form" style="display:flex; flex-direction:column; gap:0.85rem;">
         <div class="form-group"><label>Select Pet *</label><select id="svc-pet" class="form-control" required></select></div>
@@ -137,6 +144,7 @@ function showBookingModal(providerId, providerName, providerType, user) {
 
   supabase.from('pets').select('id, name').eq('owner_id', user.uid).then(({ data }) => {
     const sel = document.getElementById('svc-pet');
-    if (sel) sel.innerHTML = (data || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('') || '<option value="">Register a pet first</option>';
+    // FIX (XSS): pet.name escaped before insertion into <option>.
+    if (sel) sel.innerHTML = (data || []).map(p => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('') || '<option value="">Register a pet first</option>';
   });
 }

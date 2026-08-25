@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, safeUrlOrEmpty } from './utils.js';
 import { escapeHTML } from './utils.js';
 let currentFilter = 'All';
 
@@ -62,8 +62,8 @@ export async function renderCommunity() {
 
         <div style="display:flex; gap:0.5rem; overflow-x:auto; padding-bottom:0.25rem;">
           ${['All', 'showcase', 'tips', 'stories', 'qa'].map(cat => `
-            <button class="btn btn-outline filter-chip ${currentFilter === cat ? 'active' : ''}" data-category="${cat}" style="padding:0.4rem 1rem; font-size:0.75rem; border-radius:var(--radius-full);">
-              ${cat === 'All' ? 'All Posts' : cat.toUpperCase()}
+            <button class="btn btn-outline filter-chip ${currentFilter === cat ? 'active' : ''}" data-category="${escapeHTML(cat)}" style="padding:0.4rem 1rem; font-size:0.75rem; border-radius:var(--radius-full);">
+              ${cat === 'All' ? 'All Posts' : escapeHTML(cat.toUpperCase())}
             </button>
           `).join('')}
         </div>
@@ -140,15 +140,21 @@ async function loadTopContributors() {
       return;
     }
 
-    container.innerHTML = contributors.map(c => `
+    container.innerHTML = contributors.map(c => {
+      // FIX (XSS): display_name escaped; avatar seed is safely built from
+      // an already-escaped, URL-encoded value, never raw markup.
+      const safeName = escapeHTML(c.display_name || 'Contributor');
+      const avatarUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(c.display_name || c.id)}`;
+      return `
       <div style="display:flex; gap:0.5rem; align-items:center; text-align:left; font-size:0.8rem;">
-        <div style="width:32px; height:32px; border-radius:50%; overflow:hidden;"><img src="https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(c.display_name || c.id)}" style="width:100%; height:100%;"></div>
+        <div style="width:32px; height:32px; border-radius:50%; overflow:hidden;"><img src="${escapeHTML(avatarUrl)}" style="width:100%; height:100%;"></div>
         <div>
-          <strong>${escapeHTML(c.display_name || 'Contributor')}</strong>${c.role === 'vet' ? '<i class="fa-solid fa-circle-check verified-icon"></i>' : '<i class="fa-solid fa-shield-heart ngo-verified-icon"></i>'}
+          <strong>${safeName}</strong>${c.role === 'vet' ? '<i class="fa-solid fa-circle-check verified-icon"></i>' : '<i class="fa-solid fa-shield-heart ngo-verified-icon"></i>'}
           <span style="font-size:0.65rem; color:var(--text-muted); display:block;">${c.role === 'vet' ? 'Verified Veterinarian' : 'NGO Coordinator'}</span>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   } catch (err) {
     console.warn("Top contributors load failed:", err);
   }
@@ -176,7 +182,7 @@ async function loadCommunityPosts() {
       container.innerHTML = `
         <div class="empty-state-mini" style="padding: 3rem 0;">
           <i class="fa-solid fa-comments"></i>
-          <p>No community posts found matching category: ${currentFilter}</p>
+          <p>No community posts found matching category: ${escapeHTML(currentFilter)}</p>
         </div>
       `;
       return;
@@ -198,15 +204,25 @@ async function loadCommunityPosts() {
         roleBadge = `<span class="post-badge owner">Guardian</span>`;
       }
 
+      // FIX (XSS): author.display_name is a user-editable profile field —
+      // it was previously inserted raw. Also validate photo_url and
+      // post.photo_url as real http(s) URLs before using them as <img src>,
+      // since escapeHTML() alone doesn't stop a "javascript:" or other
+      // unsafe scheme from being placed in a src attribute.
+      const safeAuthorName = escapeHTML(author.display_name || 'PawTrace User');
+      const avatarFallback = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author.display_name || post.author_id)}`;
+      const avatarSrc = safeUrlOrEmpty(author.photo_url) || avatarFallback;
+      const postPhotoSrc = safeUrlOrEmpty(post.photo_url);
+
       const card = document.createElement('div');
       card.className = 'glass-card post-card magnetic-card';
       card.innerHTML = `
         <div class="post-header">
           <div class="post-avatar">
-            <img src="${author.photo_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + (author.display_name || post.author_id)}" style="width:100%; height:100%; object-fit:cover;">
+            <img src="${escapeHTML(avatarSrc)}" style="width:100%; height:100%; object-fit:cover;">
           </div>
           <div class="post-meta">
-            <span class="post-author">${author.display_name || 'PawTrace User'} ${roleBadge}</span>
+            <span class="post-author">${safeAuthorName} ${roleBadge}</span>
             <span class="post-time">${formatFriendlyDate(post.created_at)}</span>
           </div>
         </div>
@@ -214,13 +230,13 @@ async function loadCommunityPosts() {
         <h3 class="post-title">${escapeHTML(post.title)}</h3>
         <p class="post-body">${escapeHTML(post.content)}</p>
 
-        ${post.photo_url ? `<img src="${post.photo_url}" class="post-image" alt="Milestone Photo">` : ''}
+        ${postPhotoSrc ? `<img src="${escapeHTML(postPhotoSrc)}" class="post-image" alt="Milestone Photo">` : ''}
 
         <div class="post-actions">
-          <button class="post-action-btn btn-like ${isLiked ? 'liked' : ''}" data-id="${post.id}" data-liked="${isLiked}">
+          <button class="post-action-btn btn-like ${isLiked ? 'liked' : ''}" data-id="${escapeHTML(post.id)}" data-liked="${isLiked}">
             <i class="fa-solid fa-heart"></i> <span>Likes (${likesCount})</span>
           </button>
-          <button class="post-action-btn btn-comment-toggle" data-id="${post.id}">
+          <button class="post-action-btn btn-comment-toggle" data-id="${escapeHTML(post.id)}">
             <i class="fa-solid fa-comment"></i> <span>Comments</span>
           </button>
         </div>
@@ -228,7 +244,7 @@ async function loadCommunityPosts() {
         <div id="comments-drawer-${post.id}" class="comments-box hidden">
           <div class="comment-input-row">
             <input type="text" id="comment-input-${post.id}" class="form-control" placeholder="Write a comment..." style="padding:0.4rem 0.8rem; font-size:0.8rem;">
-            <button class="btn btn-secondary btn-submit-comment" data-id="${post.id}" style="padding:0.4rem 1rem; font-size:0.8rem;">
+            <button class="btn btn-secondary btn-submit-comment" data-id="${escapeHTML(post.id)}" style="padding:0.4rem 1rem; font-size:0.8rem;">
               Comment
             </button>
           </div>

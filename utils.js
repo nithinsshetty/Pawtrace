@@ -24,7 +24,28 @@ export function escapeHTML(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+/**
+ * Validates a URL for use in src/href attributes. Returns the URL if safe
+ * (http/https only), otherwise returns empty string. Use this for ANY
+ * database-sourced URL going into an img src, a href, etc. — escapeHTML()
+ * alone only prevents markup breakout, it does NOT validate URL schemes.
+ */
+export function safeUrlOrEmpty(url) {
+  if (!url) return '';
+  return isSafeHttpUrl(url) ? url : '';
+}
 
+/**
+ * Strips a phone number down to digits/+/-/()/space before it's placed
+ * inside a tel: href. escapeHTML() prevents HTML markup injection but does
+ * NOT validate URI schemes — a stored value like "javascript:alert(1)"
+ * would pass through escapeHTML() untouched. This ensures only phone-safe
+ * characters ever reach a tel: attribute.
+ */
+export function sanitizePhoneForHref(phone) {
+  if (!phone) return '';
+  return String(phone).replace(/[^\d+\-\s()]/g, '').trim();
+}
 export function isSafeHttpUrl(str) {
   if (!str) return false;
   try {

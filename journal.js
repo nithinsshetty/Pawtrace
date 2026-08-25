@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage, escapeHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, validateFile, FILE_LIMITS, readFileAsDataURL, formatFriendlyDate, getPetImageHTML, uploadToStorage, escapeHTML, safeUrlOrEmpty } from './utils.js';
 import { Router } from './router.js';
 
 let weightChartInstance = null;
@@ -50,7 +50,7 @@ export async function renderJournal(params) {
           </h2>
           <p style="font-size: 0.9rem; color: var(--text-muted);">
             <i class="fa-solid fa-dna"></i> ${escapeHTML(pet.breed)} &nbsp;|&nbsp;
-            <i class="fa-solid fa-scale-balanced"></i> ${pet.weight} kg &nbsp;|&nbsp;
+            <i class="fa-solid fa-scale-balanced"></i> ${escapeHTML(pet.weight)} kg &nbsp;|&nbsp;
             <i class="fa-solid fa-id-card"></i> ${escapeHTML(pet.pawtrace_id)}
           </p>
         </div>
@@ -163,20 +163,25 @@ async function loadJournalEntries(petId) {
       const item = document.createElement('div');
       item.className = 'timeline-item';
 
+      // FIX (XSS): validate photo_url as a real http(s) URL before using
+      // it in an <img src> — previously inserted raw.
       let imgMarkup = '';
-      if (record.photo_url) {
+      const safePhotoUrl = safeUrlOrEmpty(record.photo_url);
+      if (safePhotoUrl) {
         imgMarkup = `
           <div style="max-width:300px; max-height:200px; border-radius: var(--radius-sm); overflow:hidden; margin:0.75rem 0; border:1px solid var(--border-glass);">
-            <img src="${record.photo_url}" style="width:100%; height:100%; object-fit:cover;" alt="Milestone photo">
+            <img src="${escapeHTML(safePhotoUrl)}" style="width:100%; height:100%; object-fit:cover;" alt="Milestone photo">
           </div>
         `;
       }
 
       let weightBadge = '';
       if (record.weight) {
+        // FIX (XSS): weight is numeric in the DB, but escape defensively
+        // in case it's ever a stray string value.
         weightBadge = `
           <span class="pet-status-badge safe" style="background: var(--teal); font-size: 0.65rem; text-transform:none;">
-            Weight: ${record.weight} kg
+            Weight: ${escapeHTML(String(record.weight))} kg
           </span>
         `;
       }
@@ -188,7 +193,7 @@ async function loadJournalEntries(petId) {
             <span class="timeline-date" style="color:var(--terracotta);">${formatFriendlyDate(record.entry_date)}</span>
             <div style="display:flex; gap:0.5rem; align-items:center;">
               ${weightBadge}
-              <button class="icon-btn btn-delete-journal" data-id="${record.id}" style="width:28px; height:28px; background:transparent; border:none; color:var(--text-muted);">
+              <button class="icon-btn btn-delete-journal" data-id="${escapeHTML(record.id)}" style="width:28px; height:28px; background:transparent; border:none; color:var(--text-muted);">
                 <i class="fa-solid fa-trash" style="font-size:0.8rem;"></i>
               </button>
             </div>

@@ -1,7 +1,7 @@
 // listings.js — Supabase version
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML, escapeHTML } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, getPetImageHTML, escapeHTML, safeUrlOrEmpty } from './utils.js';
 import { Router } from './router.js';
 
 
@@ -113,8 +113,10 @@ async function renderBrowseListings(container, user) {
           imageHTML = `<div class="pet-image-container" style="position: relative; height: 160px; border-radius: var(--radius-md) var(--radius-md) 0 0; overflow:hidden;">${getPetImageHTML({ profileImage: pet.photo_url, name: pet.name }, 'large')}</div>`;
         }
       }
-      if (listing.photos && listing.photos.length > 0) {
-        imageHTML = `<div class="pet-image-container" style="position: relative; height: 160px; border-radius: var(--radius-md) var(--radius-md) 0 0; overflow:hidden;"><img src="${listing.photos[0]}" style="width:100%; height:100%; object-fit:cover;"></div>`;
+      // FIX (XSS): validate stored photo URL before using it as an <img src>.
+      const safeListingPhoto = safeUrlOrEmpty((listing.photos && listing.photos[0]) || '');
+      if (safeListingPhoto) {
+        imageHTML = `<div class="pet-image-container" style="position: relative; height: 160px; border-radius: var(--radius-md) var(--radius-md) 0 0; overflow:hidden;"><img src="${escapeHTML(safeListingPhoto)}" style="width:100%; height:100%; object-fit:cover;"></div>`;
       }
 
       const card = document.createElement('div');
@@ -124,7 +126,7 @@ async function renderBrowseListings(container, user) {
         <div class="pet-card-content" style="display:flex; flex-direction:column; justify-content:space-between; flex:1;">
           <div>
             <h4 class="pet-card-name" style="font-size:1.2rem; font-weight:800; display:flex; justify-content:space-between; align-items:center; color: var(--teal);">
-              <span>${escapeHTML(petName)}</span><span style="font-size:1rem; color:var(--terracotta);">$${listing.price}</span>
+              <span>${escapeHTML(petName)}</span><span style="font-size:1rem; color:var(--terracotta);">$${escapeHTML(String(listing.price))}</span>
             </h4>
             <div class="pet-card-meta" style="flex-direction:column; gap:0.25rem; align-items:flex-start; margin-top:0.5rem; margin-bottom:0.75rem;">
               <span><strong>Breed:</strong> ${escapeHTML(petBreed)}</span>
@@ -161,7 +163,8 @@ export async function renderCreateListingForm(container, user, prefilledPetId = 
     let petOptionsHTML = '<option value="">-- Standalone Listing (Not registered) --</option>';
     (pets || []).forEach(pet => {
       const isSelected = prefilledPetId === pet.id ? 'selected' : '';
-      petOptionsHTML += `<option value="${pet.id}" ${isSelected}>${pet.name} (${pet.breed})</option>`;
+      // FIX (XSS): pet.name / pet.breed escaped before insertion into <option>.
+      petOptionsHTML += `<option value="${escapeHTML(pet.id)}" ${isSelected}>${escapeHTML(pet.name)} (${escapeHTML(pet.breed)})</option>`;
     });
 
     container.innerHTML = `
@@ -250,12 +253,12 @@ async function renderMyListings(container, user) {
       div.style.padding = '1rem';
       div.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-          <div><strong style="color:var(--teal);">${escapeHTML(name)}</strong> - Price: $${listing.price}
+          <div><strong style="color:var(--teal);">${escapeHTML(name)}</strong> - Price: $${escapeHTML(String(listing.price))}
             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">Posted: ${formatFriendlyDate(listing.created_at)}</div>
           </div>
           <div style="display:flex; gap:0.5rem; align-items:center;">
             <span class="pet-status-badge ${listing.status === 'available' ? 'safe' : 'lost'}">${escapeHTML(listing.status.toUpperCase())}</span>
-            ${listing.status === 'available' ? `<button class="btn btn-outline mark-sold-btn" data-id="${listing.id}" style="font-size:0.75rem; padding:0.4rem 0.8rem;">Mark Sold</button>` : ''}
+            ${listing.status === 'available' ? `<button class="btn btn-outline mark-sold-btn" data-id="${escapeHTML(listing.id)}" style="font-size:0.75rem; padding:0.4rem 0.8rem;">Mark Sold</button>` : ''}
           </div>
         </div>
       `;

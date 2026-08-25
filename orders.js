@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase-config.js';
 import { getCurrentUser } from './auth.js';
-import { showToast, showLoading, showModal, closeModal, formatFriendlyDate } from './utils.js';
+import { showToast, showLoading, showModal, closeModal, formatFriendlyDate, escapeHTML } from './utils.js';
 import { Router } from './router.js';
 
 /**
@@ -18,7 +18,7 @@ export function showOrderModal(petId, petName) {
   }
 
   showModal({
-    title: `Order Smart Tag for ${petName}`,
+    title: `Order Smart Tag for ${escapeHTML(petName)}`,
     bodyHtml: `
       <div style="text-align:center; margin-bottom:1.5rem;">
         <i class="fa-solid fa-qrcode" style="font-size:3rem; color:var(--terracotta); margin-bottom:0.5rem; display:block;"></i>
@@ -171,6 +171,8 @@ export async function renderOrders() {
       return;
     }
 
+    // FIX (XSS): order.id, order.pet_name, and order.address were
+    // inserted raw in several places below — all escaped now.
     orders.forEach(order => {
       const steps = ['Pending', 'Confirmed', 'Shipped', 'Delivered', 'Activated'];
       const activeIndex = steps.indexOf(order.status);
@@ -205,11 +207,11 @@ export async function renderOrders() {
         <div class="flex-between" style="align-items:flex-start; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem;">
           <div>
             <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600;">ORDER REFERENCE</span>
-            <strong style="font-family:monospace; font-size:0.9rem;">${order.id}</strong>
+            <strong style="font-family:monospace; font-size:0.9rem;">${escapeHTML(order.id)}</strong>
           </div>
           <div>
             <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-align:right;">ORDERED FOR</span>
-            <strong style="font-size:0.9rem; text-align:right; display:block;">${order.pet_name}</strong>
+            <strong style="font-size:0.9rem; text-align:right; display:block;">${escapeHTML(order.pet_name)}</strong>
           </div>
           <div>
             <span style="font-size:0.75rem; color:var(--text-muted); display:block; font-weight:600; text-align:right;">PLACED AT</span>
@@ -230,7 +232,7 @@ export async function renderOrders() {
           <div class="geo-panel mt-2" style="background:rgba(82, 183, 136, 0.08); border-color:var(--accent-green); text-align:center; padding:0.75rem;">
             <strong style="color:var(--accent-green);"><i class="fa-solid fa-circle-check"></i> QR Code Active & Scannable!</strong>
             <p style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem;">
-              The smart recovery tag pendant has been fully linked to ${order.pet_name}'s profile. Go to <a href="#/pet/${order.pet_id}" style="color:var(--teal); font-weight:600;">Pet Profile</a> to download your code.
+              The smart recovery tag pendant has been fully linked to ${escapeHTML(order.pet_name)}'s profile. Go to <a href="#/pet/${order.pet_id}" style="color:var(--teal); font-weight:600;">Pet Profile</a> to download your code.
             </p>
           </div>
         ` : (order.status === 'Delivered' ? `
@@ -243,7 +245,7 @@ export async function renderOrders() {
         ` : `
           <div class="geo-panel mt-2" style="text-align:center; padding:0.75rem;">
             <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">
-              Shipping pendant tag to: <strong>${order.address}</strong>
+              Shipping pendant tag to: <strong>${escapeHTML(order.address)}</strong>
             </p>
           </div>
         `)}
@@ -258,7 +260,7 @@ export async function renderOrders() {
       <div class="empty-state">
         <i class="fa-solid fa-circle-exclamation" style="font-size:3rem; color:var(--accent-red);"></i>
         <h3>Sync Failed</h3>
-        <p>Failed to sync order history list. (Details: ${error.message || error})</p>
+        <p>Failed to sync order history list.</p>
       </div>
     `;
   } finally {
