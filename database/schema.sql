@@ -1052,14 +1052,60 @@ security definer
 set search_path = public
 as $$
   select
-    id, name, species, breed, gender, photo_url, pawtrace_id,
-    is_lost, has_tag, owner_id, owner_name, owner_phone,
-    emergency_contact, recovery_contact, recovery_instructions,
-    reward_amount, microchip_id, address, city, state,
-    medical_notes, allergies, conditions, vaccination_status, privacy
-  from public.pets
-  where id = p_pet_id
-    and has_tag = true;
+    p.id,
+    p.name,
+    p.species,
+    case when p.privacy->>'breed' is distinct from 'false' then p.breed else null end,
+    p.gender,
+    p.photo_url,
+    p.pawtrace_id,
+    p.is_lost,
+    p.has_tag,
+    p.owner_id,
+
+    -- Privacy is enforced here, before the row leaves PostgreSQL.
+    case when p.privacy->>'ownerName' is distinct from 'false'
+      then p.owner_name else null end,
+
+    -- All owner/recovery phone fields are gated by phoneNumber.
+    case when p.privacy->>'phoneNumber' is distinct from 'false'
+      then p.owner_phone else null end,
+
+    case when p.privacy->>'emergencyContact' is distinct from 'false'
+      then p.emergency_contact else null end,
+
+    case when p.privacy->>'phoneNumber' is distinct from 'false'
+      then p.recovery_contact else null end,
+
+    -- Recovery instructions and reward are recovery-facing public data.
+    p.recovery_instructions,
+    p.reward_amount,
+
+    case when p.privacy->>'microchipId' is distinct from 'false'
+      then p.microchip_id else null end,
+
+    case when p.privacy->>'address' is distinct from 'false'
+      then p.address else null end,
+    case when p.privacy->>'address' is distinct from 'false'
+      then p.city else null end,
+    case when p.privacy->>'address' is distinct from 'false'
+      then p.state else null end,
+
+    case when p.privacy->>'medicalInfo' is distinct from 'false'
+      then p.medical_notes else null end,
+    case when p.privacy->>'medicalInfo' is distinct from 'false'
+      then p.allergies else null end,
+    case when p.privacy->>'medicalInfo' is distinct from 'false'
+      then p.conditions else null end,
+
+    case when p.privacy->>'vaccinationStatus' is distinct from 'false'
+      then p.vaccination_status else null end,
+
+    -- Keep the privacy object so scan.js can render the same UI rules.
+    p.privacy
+  from public.pets p
+  where p.id = p_pet_id
+    and p.has_tag = true;
 $$;
 
 grant execute on function public.get_scan_pet(uuid) to anon, authenticated;
@@ -1093,6 +1139,8 @@ with check (true);
 -- ============================================================
 -- END OF PATCH 3
 -- ============================================================
+drop policy if exists "Anon can view contact info only if opted in"
+on public.pet_owner_contact;
 update public.users set is_head_admin = true where email = 'your-admin-email@example.com';
 -- ============================================================
 -- END OF SCHEMA
