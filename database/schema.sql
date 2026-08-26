@@ -1140,6 +1140,71 @@ with check (true);
 -- ============================================================
 drop policy if exists "Anon can view contact info only if opted in"
 on public.pet_owner_contact;
+create or replace function public.is_verified_vet()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.users
+    where id = auth.uid()
+      and role = 'vet'
+      and (vet_details->>'verified')::boolean is true
+  );
+$$;
+
+drop policy if exists "Vets manage medical records for accessed pets" on public.medical_records;
+create policy "Vets manage medical records for accessed pets"
+on public.medical_records for all
+using (
+  (is_verified_vet() and exists (
+    select 1 from public.vet_access
+    where vet_access.pet_id = medical_records.pet_id
+      and vet_access.vet_id = auth.uid()
+      and vet_access.status = 'active'
+  )) or is_admin()
+)
+with check (
+  (is_verified_vet() and exists (
+    select 1 from public.vet_access
+    where vet_access.pet_id = medical_records.pet_id
+      and vet_access.vet_id = auth.uid()
+      and vet_access.status = 'active'
+  )) or is_admin()
+);
+
+drop policy if exists "Vets manage reminders for accessed pets" on public.reminders;
+create policy "Vets manage reminders for accessed pets"
+on public.reminders for all
+using (
+  (is_verified_vet() and exists (
+    select 1 from public.vet_access
+    where vet_access.pet_id = reminders.pet_id
+      and vet_access.vet_id = auth.uid()
+      and vet_access.status = 'active'
+  )) or is_admin()
+)
+with check (
+  (is_verified_vet() and exists (
+    select 1 from public.vet_access
+    where vet_access.pet_id = reminders.pet_id
+      and vet_access.vet_id = auth.uid()
+      and vet_access.status = 'active'
+  )) or is_admin()
+);
+
+drop policy if exists "Vets view accessed pets" on public.pets;
+create policy "Vets view accessed pets"
+on public.pets for select
+using (
+  (is_verified_vet() and exists (
+    select 1 from public.vet_access
+    where vet_access.pet_id = pets.id
+      and vet_access.vet_id = auth.uid()
+      and vet_access.status = 'active'
+  )) or is_admin()
+);
 update public.users set is_head_admin = true where email = 'your-admin-email@example.com';
 -- ============================================================
 -- END OF SCHEMA
