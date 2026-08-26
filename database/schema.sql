@@ -160,7 +160,6 @@ create policy "Users can view own pets" on public.pets for select using (auth.ui
 create policy "Users can insert own pets" on public.pets for insert with check (auth.uid() = owner_id);
 create policy "Users can update own pets" on public.pets for update using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 create policy "Users can delete own pets" on public.pets for delete using (auth.uid() = owner_id);
-create policy "Anyone can view lost pets" on public.pets for select using (is_lost = true);
 create policy "Admins can view all pets" on public.pets for select to authenticated using (is_admin());
 create policy "Admins can update all pets" on public.pets for update to authenticated using (is_admin()) with check (is_admin());
 
