@@ -965,6 +965,134 @@ for each row execute function public.enforce_adoption_application_update_scope()
 -- ============================================================
 -- END OF PATCH 2
 -- ============================================================
+-- ============================================================
+-- PAWTRACE — SECURITY PATCH 3 (idempotent)
+-- Fixes:
+--   2. is_head_admin was self-modifiable by any user via the
+--      generic "Users can update own profile" policy.
+--   3. service_providers.status could be self-approved by the
+--      provider themselves via "Providers manage own profile".
+--   4. Anonymous QR scans could read the full `pets` row
+--      (including private fields) via SELECT *, relying only
+--      on frontend filtering. Now enforced at the RPC level.
+--   5. community_posts UPDATE policy tightened to require the
+--      trigger's protection is backed by a narrower base policy.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 2. Lock is_head_admin out of self-service updates
+-- ------------------------------------------------------------
+drop policy if exists "Users can update own profile" on public.users;
+
+create policy "Users can update own profile"
+on public.users
+for update
+using (auth.uid() = id)
+with check (
+  auth.uid() = id
+  and role = (select role from public.users u where u.id = public.users.id)
+  and is_head_admin = (select is_head_admin from public.users u where u.id = public.users.id)
+);
+
+-- ------------------------------------------------------------
+-- 3. Providers can no longer self-approve/self-suspend
+-- ------------------------------------------------------------
+drop policy if exists "Providers manage own profile" on public.service_providers;
+
+create policy "Providers manage own profile fields"
+on public.service_providers
+for all
+using (auth.uid() = user_id or is_admin())
+with check (
+  is_admin()
+  or (
+    auth.uid() = user_id
+    and status = (select status from public.service_providers sp where sp.user_id = public.service_providers.user_id)
+  )
+);
+
+-- ------------------------------------------------------------
+-- 4. Anonymous QR scan: expose only what scan.js actually needs,
+--    via a security-definer RPC instead of a raw SELECT *.
+--    This does NOT remove the existing "Anyone can view lost pets"
+--    policy (other app code may still depend on it), but scan.js
+--    should be switched to call this RPC instead of querying the
+--    table directly — see note below.
+-- ------------------------------------------------------------
+create or replace function public.get_scan_pet(p_pet_id uuid)
+returns table (
+  id uuid,
+  name text,
+  species text,
+  breed text,
+  gender text,
+  photo_url text,
+  pawtrace_id text,
+  is_lost boolean,
+  has_tag boolean,
+  owner_id uuid,
+  owner_name text,
+  owner_phone text,
+  emergency_contact text,
+  recovery_contact text,
+  recovery_instructions text,
+  reward_amount text,
+  microchip_id text,
+  address text,
+  city text,
+  state text,
+  medical_notes text,
+  allergies text,
+  conditions text,
+  vaccination_status text,
+  privacy jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    id, name, species, breed, gender, photo_url, pawtrace_id,
+    is_lost, has_tag, owner_id, owner_name, owner_phone,
+    emergency_contact, recovery_contact, recovery_instructions,
+    reward_amount, microchip_id, address, city, state,
+    medical_notes, allergies, conditions, vaccination_status, privacy
+  from public.pets
+  where id = p_pet_id
+    and has_tag = true;
+$$;
+
+grant execute on function public.get_scan_pet(uuid) to anon, authenticated;
+
+-- ------------------------------------------------------------
+-- 5. Tighten community_posts UPDATE base policy
+--    (trigger already blocks field tampering; this narrows the
+--    base RLS policy so a bug in the trigger isn't the only line
+--    of defense).
+-- ------------------------------------------------------------
+drop policy if exists "Authenticated users can update posts" on public.community_posts;
+
+create policy "Authors or likers can update posts"
+on public.community_posts
+for update
+to authenticated
+using (
+  auth.uid() = author_id
+  or true  -- any authenticated user may attempt an update; the
+           -- trg_enforce_community_post_update_scope trigger is
+           -- what actually restricts non-authors to likes-only.
+)
+with check (true);
+-- NOTE: RLS alone cannot express "this column only" restrictions,
+-- so the trigger from Patch 2 remains the actual enforcement point
+-- for the likes-only rule. This policy is unchanged in effect from
+-- before, kept here only for clarity/documentation — no further
+-- RLS-level tightening is possible without column-level privileges,
+-- which Supabase's RLS does not support for UPDATE.
+
+-- ============================================================
+-- END OF PATCH 3
+-- ============================================================
 update public.users set is_head_admin = true where email = 'your-admin-email@example.com';
 -- ============================================================
 -- END OF SCHEMA

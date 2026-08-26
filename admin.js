@@ -402,7 +402,7 @@ async function renderOrdersTab(container) {
         actionButtons = `
           <div style="display:flex; flex-direction:column; gap:0.25rem; align-items:flex-start;">
             <span style="font-size:0.75rem; color:var(--text-muted);"><i class="fa-solid fa-circle-check"></i> Fulfilled</span>
-            <button class="btn btn-outline btn-sm" onclick="window.Admin.printPetQR('${order.pet_id}', '${(order.pet_name || '').replace(/'/g, "\\'")}')" style="font-size:0.65rem; padding:0.25rem 0.5rem; display:inline-flex; align-items:center; gap:0.25rem;">
+            <button class="btn btn-outline btn-sm btn-print-qr" data-pet-id="${escapeHTML(order.pet_id)}" data-pet-name="${escapeHTML(order.pet_name || '')}" style="font-size:0.65rem; padding:0.25rem 0.5rem; display:inline-flex; align-items:center; gap:0.25rem;">
               <i class="fa-solid fa-print"></i> Print QR Tag
             </button>
           </div>
@@ -461,6 +461,11 @@ async function renderOrdersTab(container) {
       </table>
     </div>
   `;
+    container.querySelectorAll('.btn-print-qr').forEach(btn => {
+    btn.onclick = () => {
+      printPetQR(btn.getAttribute('data-pet-id'), btn.getAttribute('data-pet-name'));
+    };
+  });
 }
 
 async function renderUsersTab(container) {

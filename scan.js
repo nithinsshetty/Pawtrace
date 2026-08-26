@@ -18,11 +18,10 @@ export async function renderScanPage(params) {
   showLoading(true, "Resolving PawTrace identity...");
 
   try {
-    const { data: rawPet, error } = await supabase
-      .from('pets')
-      .select('*')
-      .eq('id', petId)
-      .single();
+    const { data: rawPetRows, error } = await supabase
+      .rpc('get_scan_pet', { p_pet_id: petId });
+
+    const rawPet = rawPetRows && rawPetRows.length > 0 ? rawPetRows[0] : null;
 
     if (error || !rawPet) {
       viewport.innerHTML = `

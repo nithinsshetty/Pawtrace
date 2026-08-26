@@ -25,7 +25,6 @@ The application uses a lightweight frontend architecture with Vanilla JavaScript
 * REST API
 * CORS
 * dotenv
-* bcrypt
 
 ## Database, Authentication & Storage
 * Supabase
