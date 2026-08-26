@@ -868,6 +868,103 @@ using (
 -- ============================================================
 -- END OF PATCH
 -- ============================================================
+-- ============================================================
+-- PAWTRACE — SECURITY PATCH 2 (idempotent)
+-- Fixes column-level authorization gaps that plain RLS
+-- policies can't express on their own — both require triggers.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. community_posts: non-authors may only toggle `likes`,
+--    never rewrite title/content/photo/author/category.
+-- ------------------------------------------------------------
+drop policy if exists "Users update own posts (likes)" on public.community_posts;
+
+create policy "Authenticated users can update posts"
+on public.community_posts
+for update
+to authenticated
+using (true)
+with check (true);
+
+create or replace function public.enforce_community_post_update_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() = OLD.author_id then
+    return NEW; -- authors can edit their own post freely
+  end if;
+
+  if NEW.title <> OLD.title
+     or NEW.content <> OLD.content
+     or NEW.photo_url is distinct from OLD.photo_url
+     or NEW.category <> OLD.category
+     or NEW.author_id <> OLD.author_id
+     or NEW.created_at <> OLD.created_at
+  then
+    raise exception 'Only the post author can edit this field.';
+  end if;
+
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_enforce_community_post_update_scope on public.community_posts;
+create trigger trg_enforce_community_post_update_scope
+before update on public.community_posts
+for each row execute function public.enforce_community_post_update_scope();
+
+-- ------------------------------------------------------------
+-- 2. adoption_applications: applicants can only move an
+--    already-APPROVED application to COMPLETED (the "Confirm
+--    Adoption" flow) — never set/skip to APPROVED themselves.
+--    NGOs (org_id) and admins retain full update rights.
+-- ------------------------------------------------------------
+create or replace function public.enforce_adoption_application_update_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if is_admin() then
+    return NEW;
+  end if;
+
+  if auth.uid() = OLD.org_id then
+    if NEW.applicant_uid <> OLD.applicant_uid or NEW.animal_id <> OLD.animal_id then
+      raise exception 'Cannot reassign applicant or animal.';
+    end if;
+    return NEW;
+  end if;
+
+  if auth.uid() = OLD.applicant_uid then
+    if OLD.status = 'APPROVED'
+       and NEW.status = 'COMPLETED'
+       and NEW.applicant_uid = OLD.applicant_uid
+       and NEW.org_id = OLD.org_id
+       and NEW.animal_id = OLD.animal_id
+    then
+      return NEW;
+    end if;
+    raise exception 'Applicants may only confirm an already-approved adoption.';
+  end if;
+
+  raise exception 'Not authorized to update this application.';
+end;
+$$;
+
+drop trigger if exists trg_enforce_adoption_application_update_scope on public.adoption_applications;
+create trigger trg_enforce_adoption_application_update_scope
+before update on public.adoption_applications
+for each row execute function public.enforce_adoption_application_update_scope();
+
+-- ============================================================
+-- END OF PATCH 2
+-- ============================================================
 update public.users set is_head_admin = true where email = 'your-admin-email@example.com';
 -- ============================================================
 -- END OF SCHEMA

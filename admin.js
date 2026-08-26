@@ -501,9 +501,6 @@ async function renderUsersTab(container) {
       ? formatFriendlyDate(user.created_at)
       : 'N/A';
 
-    const safeUserId = encodeURIComponent(user.id || '');
-    const safeDisplayName = encodeURIComponent(user.display_name || '');
-
     let actionBtn = '';
 
     if (user.role !== 'admin') {
@@ -1075,6 +1072,9 @@ async function renderProvidersTab(container) {
         ? `<button class="btn btn-danger btn-sm" onclick="window.Admin.toggleProviderStatus('${p.user_id}', 'suspended')" style="font-size:0.7rem; padding:0.35rem 0.6rem;">Suspend</button>`
         : `<button class="btn btn-primary btn-sm" onclick="window.Admin.toggleProviderStatus('${p.user_id}', 'approved')" style="font-size:0.7rem; padding:0.35rem 0.6rem; background:#52b788; border:none; color:white;">Approve</button>`;
 
+      // FIX: the ID-proof link was missing its opening `<a` tag, which
+      // rendered the href/target/rel attributes as broken floating text
+      // instead of a real hyperlink.
       rowsHtml += `
         <tr>
           <td>
@@ -1106,15 +1106,13 @@ async function renderProvidersTab(container) {
             ${
               p.id_proof_url
                 ? `
-                  
                     href="${escapeHTML(p.id_proof_url)}"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="text-link"
                     style="font-size:0.75rem;">
                     <i class="fa-solid fa-file-contract"></i> View ID
-                  </a>
-                `
+                  </a>`
                 : `
                   <span style="font-size:0.75rem; color:var(--text-muted);">
                     None
@@ -1277,14 +1275,6 @@ export async function toggleProviderStatus(providerId, status) {
 
 /**
  * FIX (#13): Report moderation now handles 'listing' target_type reports.
- *
- * The old comment here claimed the `pet_listings` table "hasn't been
- * migrated to Supabase yet" — that is stale. `listings.js` already reads
- * and writes `pet_listings` (createPetListing / updatePetListingStatus /
- * getActivePetListings), so a report of target_type === 'listing' can
- * genuinely be actioned: penalizing a listing now marks it 'removed' in
- * `pet_listings` and notifies the seller, exactly like the existing
- * 'provider' branch does for service_providers.
  */
 export async function moderateReport(reportId, action) {
   showLoading(true, "Processing moderation response...");
@@ -1320,8 +1310,6 @@ export async function moderateReport(reportId, action) {
         }
 
         if (!listing) {
-          // Listing no longer exists (already deleted/sold) — safe to
-          // resolve the report since there's nothing left to moderate.
           showToast("Reported listing no longer exists. Marking report resolved.", "info");
         } else {
           const { error: listingUpdateErr } = await supabase
@@ -1340,10 +1328,6 @@ export async function moderateReport(reportId, action) {
           }
         }
       }
-      // Any other target_type (e.g. community posts) currently has no
-      // dedicated penalty action — the report is still marked resolved
-      // below so it leaves the active queue, but no destructive action
-      // is silently skipped for the two types we do support.
     }
 
     await supabase.from('reports').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', reportId);
