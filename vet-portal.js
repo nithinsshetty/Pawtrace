@@ -139,9 +139,18 @@ async function updateVetProfile(uid, licenseNumber) {
 
   showLoading(true, "Updating clinic profile...");
   try {
+    // FIX: never re-assert `verified` from the client. That flag is
+    // admin-controlled only (see schema.sql Patch 4) — hardcoding `true`
+    // here meant a vet whose verification had been revoked by an admin
+    // could silently re-verify themselves just by saving their profile.
+    // Read the current value and carry it forward unchanged instead.
+    const { data: currentUserRow, error: fetchErr } = await supabase.from('users').select('vet_details').eq('id', uid).single();
+    if (fetchErr) throw fetchErr;
+    const currentlyVerified = currentUserRow?.vet_details?.verified === true;
+
     const { error } = await supabase.from('users').update({
       display_name: clinicName,
-      vet_details: { licenseNumber, clinicName, specializations, city, availability, address, verified: true }
+      vet_details: { licenseNumber, clinicName, specializations, city, availability, address, verified: currentlyVerified }
     }).eq('id', uid);
     if (error) throw error;
 
